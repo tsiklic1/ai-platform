@@ -8,6 +8,7 @@ import brandProducts from "./routes/brand-products";
 import contentTypes from "./routes/content-types";
 import images from "./routes/images";
 import texts from "./routes/texts";
+import frames from "./routes/frames";
 
 const app = new Hono();
 
@@ -28,6 +29,7 @@ app.route("/brands", brandProducts);
 app.route("/brands", contentTypes);
 app.route("/brands", images);
 app.route("/brands", texts);
+app.route("/brands", frames);
 
 export default {
   port: Number(process.env.PORT) || 3000,
