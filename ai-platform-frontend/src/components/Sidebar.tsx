@@ -31,6 +31,7 @@ export function Sidebar() {
         <SidebarLink to="/contentTypes">Content Types</SidebarLink>
         <SidebarLink to="/images">Pictures</SidebarLink>
         <SidebarLink to="/captions">Captions</SidebarLink>
+        <SidebarLink to="/frames">Video Frames</SidebarLink>
         <SidebarLink to="/videos">Videos</SidebarLink>
         <SidebarLink to="/identity">Brand Identity</SidebarLink>
         <SidebarLink to="/brands">Manage Brands</SidebarLink>
