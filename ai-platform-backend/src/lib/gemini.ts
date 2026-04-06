@@ -49,7 +49,8 @@ export async function generateImage(
   productImages: ReferenceImage[] = [],
   contentTypeImages: ReferenceImage[] = [],
   aspectRatio: "1:1" | "9:16" = "1:1",
-  skillsContent?: string | null
+  skillsContent?: string | null,
+  previousFrame?: ReferenceImage | null
 ): Promise<GeneratedImage> {
   if (!OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured");
@@ -87,6 +88,18 @@ export async function generateImage(
         image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
       });
     }
+  }
+
+  // Previous frame reference (for sequential frame generation)
+  if (previousFrame) {
+    content.push({
+      type: "text",
+      text: "The following image is the PREVIOUS FRAME in a video sequence. Generate the next frame while maintaining visual continuity — keep the same style, lighting, colors, and scene elements:",
+    });
+    content.push({
+      type: "image_url",
+      image_url: { url: `data:${previousFrame.mimeType};base64,${previousFrame.base64}` },
+    });
   }
 
   // Main prompt

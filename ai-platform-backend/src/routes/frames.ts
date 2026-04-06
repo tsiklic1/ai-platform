@@ -203,33 +203,23 @@ frames.post("/:brandId/frames/generate", async (c) => {
 
   for (let n = 1; n <= FRAME_COUNT; n++) {
     // Build frame-specific prompt
-    const framePrompt = `Frame ${n}/${FRAME_COUNT} of a video sequence. Generate this frame as part of a smooth visual narrative.\n\n${basePrompt}`;
+    const framePrompt = `Frame ${n}/${FRAME_COUNT} of a video sequence.\n\n${basePrompt}`;
 
-    // Build reference images for this frame: product images + previous frame
-    const frameRefImages = [...productImages];
-    if (previousFrameBase64 && previousFrameMimeType) {
-      frameRefImages.push({
-        base64: previousFrameBase64,
-        mimeType: previousFrameMimeType,
-      });
-    }
-
-    // Build the prompt with continuity instructions
-    let finalFramePrompt = framePrompt;
-    if (n > 1) {
-      finalFramePrompt =
-        "The following images include the PREVIOUS FRAME of this video sequence. You MUST maintain exact visual continuity — same style, lighting, color palette, camera angle, and scene elements. Only advance the action/motion slightly for this next frame.\n\n" +
-        framePrompt;
-    }
+    // Build previous frame reference (if not the first frame)
+    const prevFrame =
+      previousFrameBase64 && previousFrameMimeType
+        ? { base64: previousFrameBase64, mimeType: previousFrameMimeType }
+        : null;
 
     let generated: { data: string; mimeType: string };
     try {
       generated = await generateImage(
-        finalFramePrompt,
-        frameRefImages,
+        framePrompt,
+        productImages,
         contentTypeImages,
         aspectRatio as "1:1" | "9:16",
-        skillsContent
+        skillsContent,
+        prevFrame
       );
     } catch (err) {
       console.error(`[frames] Frame ${n} generation failed:`, err);
