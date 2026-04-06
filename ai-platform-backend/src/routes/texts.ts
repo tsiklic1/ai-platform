@@ -19,9 +19,10 @@ texts.post("/:brandId/texts/generate", async (c) => {
   const body = await c.req.json<{
     prompt: string;
     content_type_id?: string;
+    skill_ids?: string[];
   }>();
 
-  const { prompt, content_type_id } = body;
+  const { prompt, content_type_id, skill_ids } = body;
   if (!prompt?.trim()) {
     return c.json({ error: "prompt is required" }, 400);
   }
@@ -63,11 +64,29 @@ texts.post("/:brandId/texts/generate", async (c) => {
     contentType = data;
   }
 
+  // Fetch selected skills (if any)
+  let skillsContent: string | null = null;
+  if (Array.isArray(skill_ids) && skill_ids.length > 0) {
+    const { data: skillsData } = await sb
+      .from("skills")
+      .select("name, content")
+      .in("id", skill_ids);
+
+    if (skillsData && skillsData.length > 0) {
+      skillsContent = skillsData
+        .map((s: { name: string; content: string }) =>
+          `## Skill: ${s.name}\n${s.content}`
+        )
+        .join("\n\n---\n\n");
+    }
+  }
+
   // Assemble prompt
   const { systemPrompt, userPrompt, fullPrompt } = assembleTextPrompt(
     prompt.trim(),
     contentType,
-    brandContext
+    brandContext,
+    skillsContent
   );
 
   // Generate text via Claude

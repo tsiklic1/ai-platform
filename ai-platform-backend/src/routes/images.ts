@@ -24,6 +24,7 @@ images.post("/:brandId/images/generate", async (c) => {
     content_type_id?: string;
     aspect_ratio?: string;
     product_ids?: string[];
+    skill_ids?: string[];
   };
   try {
     body = await c.req.json();
@@ -31,7 +32,7 @@ images.post("/:brandId/images/generate", async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { prompt, content_type_id, product_ids } = body;
+  const { prompt, content_type_id, product_ids, skill_ids } = body;
   let aspectRatio = body.aspect_ratio;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
@@ -153,6 +154,23 @@ images.post("/:brandId/images/generate", async (c) => {
     }
   }
 
+  // Fetch selected skills (if any)
+  let skillsContent: string | null = null;
+  if (Array.isArray(skill_ids) && skill_ids.length > 0) {
+    const { data: skillsData } = await sb
+      .from("skills")
+      .select("name, content")
+      .in("id", skill_ids);
+
+    if (skillsData && skillsData.length > 0) {
+      skillsContent = skillsData
+        .map((s: { name: string; content: string }) =>
+          `## Skill: ${s.name}\n${s.content}`
+        )
+        .join("\n\n---\n\n");
+    }
+  }
+
   // Assemble prompt
   const fullPrompt = assemblePrompt(prompt.trim(), contentType);
 
@@ -163,7 +181,8 @@ images.post("/:brandId/images/generate", async (c) => {
       fullPrompt,
       productImages,
       contentTypeImages,
-      aspectRatio as "1:1" | "9:16"
+      aspectRatio as "1:1" | "9:16",
+      skillsContent
     );
   } catch (err) {
     console.error("[images] Generation failed:", err);
@@ -205,7 +224,9 @@ images.post("/:brandId/images/generate", async (c) => {
       brand_id: brandId,
       content_type_id: content_type_id || null,
       prompt: prompt.trim(),
-      full_prompt: fullPrompt,
+      full_prompt: skillsContent
+        ? `[SKILLS]\n${skillsContent}\n\n[PROMPT]\n${fullPrompt}`
+        : fullPrompt,
       aspect_ratio: aspectRatio,
       storage_path: storagePath,
       url: publicUrl,

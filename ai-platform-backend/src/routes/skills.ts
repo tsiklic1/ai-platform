@@ -11,8 +11,24 @@ skills.get("/", async (c) => {
   const sb = createUserClient(token);
   const { data, error } = await sb
     .from("skills")
-    .select("id, name, description, updated_at")
+    .select("id, name, description, actions, updated_at")
     .order("updated_at", { ascending: false });
+
+  if (error) return c.json({ error: error.message }, 400);
+  return c.json({ skills: data });
+});
+
+// Get skills filtered by action type
+skills.get("/by-action/:action", async (c) => {
+  const token = c.get("token");
+  const action = c.req.param("action");
+  const sb = createUserClient(token);
+
+  const { data, error } = await sb
+    .from("skills")
+    .select("id, name, description")
+    .contains("actions", [action])
+    .order("name");
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ skills: data });
@@ -36,16 +52,20 @@ skills.get("/:id", async (c) => {
 skills.post("/", async (c) => {
   const token = c.get("token");
   const user = c.get("user");
-  const { name, description, content } = await c.req.json();
+  const { name, description, content, actions } = await c.req.json();
 
   if (!name || !content) {
     return c.json({ error: "name and content are required" }, 400);
   }
 
+  const validActions = Array.isArray(actions)
+    ? actions.filter((a: unknown) => typeof a === "string")
+    : [];
+
   const sb = createUserClient(token);
   const { data, error } = await sb
     .from("skills")
-    .insert({ user_id: user.id, name, description: description || null, content })
+    .insert({ user_id: user.id, name, description: description || null, content, actions: validActions })
     .select()
     .single();
 
@@ -64,6 +84,11 @@ skills.put("/:id", async (c) => {
   if (body.name !== undefined) updates.name = body.name;
   if (body.description !== undefined) updates.description = body.description;
   if (body.content !== undefined) updates.content = body.content;
+  if (body.actions !== undefined) {
+    updates.actions = Array.isArray(body.actions)
+      ? body.actions.filter((a: unknown) => typeof a === "string")
+      : [];
+  }
 
   const sb = createUserClient(token);
   const { data, error } = await sb

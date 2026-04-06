@@ -48,7 +48,8 @@ export async function generateImage(
   prompt: string,
   productImages: ReferenceImage[] = [],
   contentTypeImages: ReferenceImage[] = [],
-  aspectRatio: "1:1" | "9:16" = "1:1"
+  aspectRatio: "1:1" | "9:16" = "1:1",
+  skillsContent?: string | null
 ): Promise<GeneratedImage> {
   if (!OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured");
@@ -92,6 +93,12 @@ export async function generateImage(
   content.push({ type: "text", text: prompt });
 
   try {
+    const messages: Array<{ role: string; content: unknown }> = [];
+    if (skillsContent) {
+      messages.push({ role: "system", content: skillsContent });
+    }
+    messages.push({ role: "user", content });
+
     const response = await fetch(OPENROUTER_BASE_URL, {
       method: "POST",
       headers: {
@@ -100,7 +107,7 @@ export async function generateImage(
       },
       body: JSON.stringify({
         model: MODEL,
-        messages: [{ role: "user", content }],
+        messages,
         response_modalities: ["image"],
         image_config: { aspect_ratio: aspectRatio },
       }),

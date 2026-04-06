@@ -22,13 +22,18 @@ interface BrandContext {
 export function assembleTextPrompt(
   userPrompt: string,
   contentType?: ContentTypeForTextPrompt | null,
-  brandContext?: BrandContext | null
+  brandContext?: BrandContext | null,
+  skillsContent?: string | null
 ): { systemPrompt: string; userPrompt: string; fullPrompt: string } {
   const systemParts: string[] = [
     "You are an expert Instagram caption writer. Write engaging, on-brand captions for social media posts.",
     "Captions should be 150-300 characters, include relevant hashtags, and have a clear call-to-action when appropriate.",
     "Return ONLY the caption text — no titles, labels, or meta-commentary.",
   ];
+
+  if (skillsContent) {
+    systemParts.push(`\n--- Skills & Guidelines ---\n${skillsContent}`);
+  }
 
   if (brandContext) {
     systemParts.push(`\nBrand: ${brandContext.brandName}`);
