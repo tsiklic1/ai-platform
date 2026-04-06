@@ -422,7 +422,7 @@ export default function Frames() {
       </div>
 
       {/* Generation Form */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-8">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-8 sticky top-0 z-10">
         {/* Error */}
         {genError && (
           <div className="px-3 py-2 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs mb-3">
@@ -470,7 +470,7 @@ export default function Frames() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            rows={3}
+            rows={6}
             placeholder="Describe the video sequence you want to generate (5 frames will be created)..."
             disabled={generating}
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none disabled:opacity-50"
