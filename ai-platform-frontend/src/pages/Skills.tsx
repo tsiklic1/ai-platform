@@ -7,6 +7,7 @@ interface SkillSummary {
   id: string
   name: string
   description: string | null
+  actions: string[]
   updated_at: string
 }
 
@@ -15,6 +16,13 @@ interface SkillFull extends SkillSummary {
   user_id: string
   created_at: string
 }
+
+const ALL_ACTIONS = [
+  { id: 'image', label: 'Image Generation' },
+  { id: 'text', label: 'Text / Captions' },
+  { id: 'video', label: 'Video' },
+  { id: 'frames', label: 'Video Frames' },
+] as const
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -37,7 +45,7 @@ interface SidebarProps {
   open: boolean
   saving: boolean
   onClose: () => void
-  onSave: (data: { name: string; description: string; content: string }) => void
+  onSave: (data: { name: string; description: string; content: string; actions: string[] }) => void
   onDelete: () => void
 }
 
@@ -45,22 +53,31 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [content, setContent] = useState('')
+  const [actions, setActions] = useState<string[]>([])
 
   useEffect(() => {
     if (isNew) {
       setName('')
       setDescription('')
       setContent('')
+      setActions([])
     } else if (skill) {
       setName(skill.name)
       setDescription(skill.description || '')
       setContent(skill.content || '')
+      setActions(skill.actions || [])
     }
   }, [skill, isNew])
 
+  const toggleAction = (actionId: string) => {
+    setActions((prev) =>
+      prev.includes(actionId) ? prev.filter((a) => a !== actionId) : [...prev, actionId]
+    )
+  }
+
   const handleSave = () => {
     if (!name.trim() || !content.trim()) return
-    onSave({ name: name.trim(), description: description.trim(), content: content.trim() })
+    onSave({ name: name.trim(), description: description.trim(), content: content.trim(), actions })
   }
 
   return (
@@ -114,6 +131,29 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
               placeholder="Short description of what this skill provides"
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Available Actions</label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_ACTIONS.map((a) => {
+                const checked = actions.includes(a.id)
+                return (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => toggleAction(a.id)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                      checked
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'
+                    }`}
+                  >
+                    {a.label}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           <div className="flex-1 flex flex-col">
@@ -223,7 +263,7 @@ export default function Skills() {
   }
 
   // Save (create or update)
-  const handleSave = async (data: { name: string; description: string; content: string }) => {
+  const handleSave = async (data: { name: string; description: string; content: string; actions: string[] }) => {
     if (!token) return
     setSaving(true)
     try {
@@ -293,7 +333,14 @@ export default function Skills() {
               {skill.description && (
                 <p className="mt-1 text-sm text-gray-500 line-clamp-2">{skill.description}</p>
               )}
-              <p className="mt-3 text-xs text-gray-400">Updated {timeAgo(skill.updated_at)}</p>
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
+                {skill.actions.map((a) => (
+                  <span key={a} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full font-medium">
+                    {a}
+                  </span>
+                ))}
+                <span className="text-xs text-gray-400 ml-auto">{timeAgo(skill.updated_at)}</span>
+              </div>
             </button>
           ))}
 

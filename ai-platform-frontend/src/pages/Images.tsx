@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { NoBrandPrompt } from "../components/NoBrandPrompt";
 import { AspectRatioToggle } from "../components/AspectRatioToggle";
 import { ContentTypeSelector } from "../components/ContentTypeSelector";
+import { SkillPicker } from "../components/SkillPicker";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -217,6 +218,7 @@ export default function Images() {
   const [contentTypeId, setContentTypeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "9:16">("1:1");
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -275,6 +277,7 @@ export default function Images() {
     setContentTypeId(null);
     setPrompt("");
     setAspectRatio("1:1");
+    setSelectedSkillIds([]);
     fetchImages(1);
   }, [fetchImages]);
 
@@ -290,6 +293,7 @@ export default function Images() {
           prompt: prompt.trim(),
           content_type_id: contentTypeId,
           aspect_ratio: aspectRatio,
+          skill_ids: selectedSkillIds.length > 0 ? selectedSkillIds : undefined,
         },
         token,
       });
@@ -477,6 +481,16 @@ export default function Images() {
               </label>
               <AspectRatioToggle value={aspectRatio} onChange={setAspectRatio} />
             </div>
+          </div>
+
+          {/* Skills */}
+          <div className="mb-3">
+            <SkillPicker
+              action="image"
+              token={token}
+              selectedIds={selectedSkillIds}
+              onChange={setSelectedSkillIds}
+            />
           </div>
 
           {/* Prompt + Generate button row */}

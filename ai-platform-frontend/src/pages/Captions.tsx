@@ -4,6 +4,7 @@ import { useBrand } from "../context/BrandContext";
 import { api } from "../lib/api";
 import { NoBrandPrompt } from "../components/NoBrandPrompt";
 import { ContentTypeSelector } from "../components/ContentTypeSelector";
+import { SkillPicker } from "../components/SkillPicker";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -162,6 +163,7 @@ export default function Captions() {
   // Generation form state
   const [contentTypeId, setContentTypeId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -237,6 +239,7 @@ export default function Captions() {
     setPage(1);
     setContentTypeId(null);
     setPrompt("");
+    setSelectedSkillIds([]);
     setExpandedPromptId(null);
     fetchTexts(1);
   }, [fetchTexts]);
@@ -252,6 +255,7 @@ export default function Captions() {
         body: {
           prompt: prompt.trim(),
           content_type_id: contentTypeId,
+          skill_ids: selectedSkillIds.length > 0 ? selectedSkillIds : undefined,
         },
         token,
       });
@@ -356,6 +360,16 @@ export default function Captions() {
             token={token}
             value={contentTypeId}
             onChange={handleContentTypeChange}
+          />
+        </div>
+
+        {/* Skills */}
+        <div className="mb-3">
+          <SkillPicker
+            action="text"
+            token={token}
+            selectedIds={selectedSkillIds}
+            onChange={setSelectedSkillIds}
           />
         </div>
 
