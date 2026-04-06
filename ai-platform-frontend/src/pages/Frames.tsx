@@ -480,7 +480,7 @@ export default function Frames() {
         {/* Generate button */}
         <div className="flex items-center justify-between">
           <p className="text-[10px] text-gray-400">
-            Generates 5 frames sequentially (~2 min). Each frame references
+            Generates 5 frames sequentially (up to 10 min). Each frame references
             the previous for visual continuity.{" "}
             <span className="text-gray-300">Cmd+Enter to generate</span>
           </p>
