@@ -8,12 +8,13 @@ interface SkillSummary {
   name: string
   description: string | null
   actions: string[]
+  is_default: boolean
   updated_at: string
 }
 
 interface SkillFull extends SkillSummary {
   content: string
-  user_id: string
+  user_id: string | null
   created_at: string
 }
 
@@ -54,6 +55,8 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
   const [description, setDescription] = useState('')
   const [content, setContent] = useState('')
   const [actions, setActions] = useState<string[]>([])
+
+  const readOnly = !isNew && !!skill?.is_default
 
   useEffect(() => {
     if (isNew) {
@@ -98,8 +101,13 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">
-            {isNew ? 'New Skill' : 'Edit Skill'}
+          <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+            {isNew ? 'New Skill' : readOnly ? 'Default Skill' : 'Edit Skill'}
+            {readOnly && (
+              <span className="text-[10px] font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full uppercase tracking-wide">
+                Read-only
+              </span>
+            )}
           </h2>
           <button
             onClick={onClose}
@@ -117,8 +125,9 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              disabled={readOnly}
               placeholder="e.g. blockchain-basics"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
 
@@ -128,8 +137,9 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              disabled={readOnly}
               placeholder="Short description of what this skill provides"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
 
@@ -142,8 +152,9 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
                   <button
                     key={a.id}
                     type="button"
-                    onClick={() => toggleAction(a.id)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                    onClick={() => !readOnly && toggleAction(a.id)}
+                    disabled={readOnly}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors disabled:cursor-not-allowed ${
                       checked
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400'
@@ -161,23 +172,26 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
+              disabled={readOnly}
               placeholder={"# Skill Knowledge\n\nWrite the skill content in markdown..."}
-              className="w-full flex-1 min-h-[400px] rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y"
+              className="w-full flex-1 min-h-[400px] rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-gray-200 flex items-center gap-3">
-          <button
-            onClick={handleSave}
-            disabled={saving || !name.trim() || !content.trim()}
-            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving ? 'Saving...' : isNew ? 'Create' : 'Save Changes'}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={handleSave}
+              disabled={saving || !name.trim() || !content.trim()}
+              className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? 'Saving...' : isNew ? 'Create' : 'Save Changes'}
+            </button>
+          )}
 
-          {!isNew && (
+          {!isNew && !readOnly && (
             <button
               onClick={onDelete}
               disabled={saving}
@@ -191,7 +205,7 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
             onClick={onClose}
             className="px-4 py-2 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-100 transition-colors ml-auto"
           >
-            Cancel
+            {readOnly ? 'Close' : 'Cancel'}
           </button>
         </div>
       </div>
@@ -325,17 +339,40 @@ export default function Skills() {
             <button
               key={skill.id}
               onClick={() => handleCardClick(skill)}
-              className="text-left p-5 rounded-xl border border-gray-200 bg-white hover:border-indigo-300 hover:shadow-md transition-all group"
+              className={`text-left p-5 rounded-xl border transition-all group ${
+                skill.is_default
+                  ? 'border-amber-300 bg-amber-50/50 hover:border-amber-400 hover:shadow-md'
+                  : 'border-gray-200 bg-white hover:border-indigo-300 hover:shadow-md'
+              }`}
             >
-              <h3 className="font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors truncate">
-                {skill.name}
-              </h3>
+              <div className="flex items-start justify-between gap-2">
+                <h3
+                  className={`font-semibold text-gray-900 transition-colors truncate ${
+                    skill.is_default ? 'group-hover:text-amber-700' : 'group-hover:text-indigo-600'
+                  }`}
+                >
+                  {skill.is_default && <span className="mr-1">★</span>}
+                  {skill.name}
+                </h3>
+                {skill.is_default && (
+                  <span className="shrink-0 text-[9px] font-semibold bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded-full uppercase tracking-wide">
+                    Default
+                  </span>
+                )}
+              </div>
               {skill.description && (
                 <p className="mt-1 text-sm text-gray-500 line-clamp-2">{skill.description}</p>
               )}
               <div className="mt-3 flex items-center gap-2 flex-wrap">
                 {skill.actions.map((a) => (
-                  <span key={a} className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded-full font-medium">
+                  <span
+                    key={a}
+                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      skill.is_default
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-indigo-50 text-indigo-600'
+                    }`}
+                  >
                     {a}
                   </span>
                 ))}

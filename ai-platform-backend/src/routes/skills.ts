@@ -11,7 +11,8 @@ skills.get("/", async (c) => {
   const sb = createUserClient(token);
   const { data, error } = await sb
     .from("skills")
-    .select("id, name, description, actions, updated_at")
+    .select("id, name, description, actions, is_default, updated_at")
+    .order("is_default", { ascending: false })
     .order("updated_at", { ascending: false });
 
   if (error) return c.json({ error: error.message }, 400);
@@ -26,8 +27,9 @@ skills.get("/by-action/:action", async (c) => {
 
   const { data, error } = await sb
     .from("skills")
-    .select("id, name, description")
+    .select("id, name, description, is_default")
     .contains("actions", [action])
+    .order("is_default", { ascending: false })
     .order("name");
 
   if (error) return c.json({ error: error.message }, 400);
@@ -77,6 +79,18 @@ skills.post("/", async (c) => {
 skills.put("/:id", async (c) => {
   const token = c.get("token");
   const body = await c.req.json();
+  const sb = createUserClient(token);
+
+  // Block edits to default skills
+  const { data: existing } = await sb
+    .from("skills")
+    .select("is_default")
+    .eq("id", c.req.param("id"))
+    .single();
+
+  if (existing?.is_default) {
+    return c.json({ error: "Default skills cannot be modified" }, 403);
+  }
 
   const updates: Record<string, unknown> = {
     updated_at: new Date().toISOString(),
@@ -90,7 +104,6 @@ skills.put("/:id", async (c) => {
       : [];
   }
 
-  const sb = createUserClient(token);
   const { data, error } = await sb
     .from("skills")
     .update(updates)
@@ -106,6 +119,18 @@ skills.put("/:id", async (c) => {
 skills.delete("/:id", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+
+  // Block deletion of default skills
+  const { data: existing } = await sb
+    .from("skills")
+    .select("is_default")
+    .eq("id", c.req.param("id"))
+    .single();
+
+  if (existing?.is_default) {
+    return c.json({ error: "Default skills cannot be deleted" }, 403);
+  }
+
   const { error } = await sb
     .from("skills")
     .delete()
