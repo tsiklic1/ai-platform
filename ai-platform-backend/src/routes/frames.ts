@@ -7,6 +7,10 @@ import {
   renderContextBlock,
 } from "../lib/generation-context";
 import { renderSkillsContent } from "../lib/skill-template";
+import {
+  generateFrameStoryboard,
+  type FrameStoryboard,
+} from "../lib/frame-storyboard";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const MIME_TO_EXT: Record<string, string> = {
@@ -231,11 +235,36 @@ frames.post("/:brandId/frames/generate", async (c) => {
     }
   }
 
+  // Claude pre-pass: expand the brief user prompt into a structured storyboard.
+  // The base scene is copy-pasted across every frame and each frame only
+  // applies its one incremental `change`. If this fails we return 500 without
+  // creating a frame set row.
+  let storyboard: FrameStoryboard;
+  try {
+    storyboard = await generateFrameStoryboard(
+      prompt.trim(),
+      ctx,
+      skillsContent,
+      FRAME_COUNT
+    );
+  } catch (err) {
+    console.error("[frames] Storyboard generation failed:", err);
+    return c.json(
+      {
+        error: `Storyboard planning failed: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`,
+      },
+      500
+    );
+  }
+
   // Assemble base prompt (unchanged: content type template + image style + user prompt)
   const basePrompt = assemblePrompt(prompt.trim(), contentType);
   const fullPrompt = [
     contextBlock,
     skillsContent ? `[Skills]\n${skillsContent}` : null,
+    `[Storyboard]\n${JSON.stringify(storyboard, null, 2)}`,
     `[Prompt]\n${basePrompt}`,
   ]
     .filter(Boolean)
@@ -250,6 +279,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
       content_type_id: content_type_id || null,
       prompt: prompt.trim(),
       full_prompt: fullPrompt,
+      storyboard: storyboard,
       aspect_ratio: aspectRatio,
       status: "generating",
       frame_count: FRAME_COUNT,
@@ -276,8 +306,20 @@ frames.post("/:brandId/frames/generate", async (c) => {
   let previousFrameMimeType: string | null = null;
 
   for (let n = 1; n <= FRAME_COUNT; n++) {
-    // Build frame-specific prompt
-    const framePrompt = `Frame ${n}/${FRAME_COUNT} of a video sequence.\n\n${basePrompt}`;
+    // Build frame-specific prompt from the storyboard: same base scene every
+    // frame, only the per-frame change differs.
+    const framePrompt = [
+      `Frame ${n}/${FRAME_COUNT} of a video sequence.`,
+      "",
+      "[BASE SCENE — identical in every frame]",
+      storyboard.base_scene,
+      "",
+      `[FRAME ${n} CHANGE]`,
+      storyboard.frames[n - 1]!.change,
+      "",
+      "[CONSISTENCY ENFORCEMENT]",
+      "Everything else in the scene — background, lighting direction, camera angle, surface, props, and all unchanged elements — must remain exactly identical to the previous frame. Only the described change should differ. The product must match the provided reference image exactly, including every letter on the label.",
+    ].join("\n");
 
     // Build previous frame reference (if not the first frame)
     const prevFrame =
