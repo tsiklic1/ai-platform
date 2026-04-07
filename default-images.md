@@ -24,6 +24,7 @@ When the image must show a real product, logo, package, or brand asset:
 
 - **Always pass a reference image** via the generation pipeline's image-reference input.
 - **Never rely on text alone** to describe packaging, labels, typography, or logos. Text prompts cannot hold enough detail to reproduce branded artwork accurately.
+- **Preserve every letter on the product exactly as it appears on the reference.** This is the #1 source of regeneration. If the reference can says "Aranxhata" and "Exotic", the generated can must say exactly "Aranxhata" and exactly "Exotic" — same spelling, same letter order, same capitalization, same font weight, same placement. No garbled characters, no invented words, no missing letters, no extra letters, no rearranged letters, no foreign-script substitutions. Treat the label text as **copy-pasted**, not re-drawn. If even one letter drifts or looks wrong, regenerate.
 - **Check the output** against the reference. If colors, label text, typography, or artwork drift from the real thing, regenerate.
 - **Prefer fewer hero products** over many. 1-3 clearly-placed product instances beat a cluttered lineup.
 - **Place products with intent.** A hero position near the focal interaction point (hand, table center, eye line) always reads better than random scattering.
