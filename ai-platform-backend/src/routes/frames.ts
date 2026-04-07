@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth";
 import { createUserClient } from "../lib/supabase";
-import { assemblePrompt, generateImage } from "../lib/gemini";
+import { assemblePrompt, generateImage, type ReferenceImage } from "../lib/gemini";
+import {
+  buildGenerationContext,
+  renderContextBlock,
+} from "../lib/generation-context";
+import { renderSkillsContent } from "../lib/skill-template";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const MIME_TO_EXT: Record<string, string> = {
@@ -44,17 +49,34 @@ frames.post("/:brandId/frames/generate", async (c) => {
 
   const sb = createUserClient(token);
 
-  // Fetch content type if provided
+  // Fetch brand (for the generation context block)
+  const { data: brand, error: brandError } = await sb
+    .from("brands")
+    .select("name, description")
+    .eq("id", brandId)
+    .single();
+
+  if (brandError || !brand) {
+    return c.json({ error: "Brand not found" }, 404);
+  }
+
+  // Fetch content type if provided. Pull the full set of fields the
+  // generation context needs.
   let contentType: {
+    name: string;
+    description: string | null;
     image_prompt_template: string | null;
     image_style: string | null;
+    text_prompt_template: string | null;
     default_aspect_ratio: string;
   } | null = null;
 
   if (content_type_id) {
     const { data, error } = await sb
       .from("content_types")
-      .select("image_prompt_template, image_style, default_aspect_ratio")
+      .select(
+        "name, description, image_prompt_template, image_style, text_prompt_template, default_aspect_ratio"
+      )
       .eq("id", content_type_id)
       .single();
 
@@ -71,35 +93,52 @@ frames.post("/:brandId/frames/generate", async (c) => {
   // Default to 9:16 for video frames
   if (!aspectRatio) aspectRatio = "9:16";
 
-  // Fetch product reference images for the brand
-  const { data: products } = await sb
+  // Fetch products with full metadata for both the context block and per-image
+  // labels.
+  const { data: allProducts } = await sb
     .from("brand_products")
-    .select("id")
+    .select("id, name, description, category")
     .eq("brand_id", brandId);
 
-  const productIds = products?.map((p: { id: string }) => p.id) || [];
+  const productList =
+    (allProducts as
+      | {
+          id: string;
+          name: string;
+          description: string | null;
+          category: string | null;
+        }[]
+      | null) || [];
 
-  let productImages: { base64: string; mimeType: string }[] = [];
+  const productById = new Map(productList.map((p) => [p.id, p]));
+  const productIds = productList.map((p) => p.id);
+
+  let productImages: ReferenceImage[] = [];
 
   if (productIds.length > 0) {
-    const query = sb
+    const { data: imageRows } = await sb
       .from("brand_product_images")
-      .select("url")
-      .order("sort_order", { ascending: true })
-      .in("product_id", productIds);
-
-    const { data: imageRows } = await query;
+      .select("url, product_id")
+      .in("product_id", productIds)
+      .order("sort_order", { ascending: true });
 
     if (imageRows && imageRows.length > 0) {
       const fetched = await Promise.all(
-        imageRows.map(async (row: { url: string }) => {
+        (imageRows as { url: string; product_id: string }[]).map(async (row): Promise<ReferenceImage | null> => {
           try {
             const res = await fetch(row.url);
             if (!res.ok) return null;
             const buffer = await res.arrayBuffer();
             const base64 = Buffer.from(buffer).toString("base64");
-            const ct = res.headers.get("content-type") || "image/jpeg";
-            return { base64, mimeType: ct };
+            const mimeType = res.headers.get("content-type") || "image/jpeg";
+            const product = productById.get(row.product_id);
+            const ref: ReferenceImage = { base64, mimeType };
+            if (product) {
+              ref.label = product.category
+                ? `"${product.name}" (${product.category})`
+                : `"${product.name}"`;
+            }
+            return ref;
           } catch {
             console.error(`[frames] Failed to fetch reference image: ${row.url}`);
             return null;
@@ -107,15 +146,15 @@ frames.post("/:brandId/frames/generate", async (c) => {
         })
       );
       productImages = fetched.filter(
-        (img): img is { base64: string; mimeType: string } => img !== null
+        (img): img is ReferenceImage => img !== null
       );
     }
   }
 
   // Fetch content type reference images
-  let contentTypeImages: { base64: string; mimeType: string }[] = [];
+  let contentTypeImages: ReferenceImage[] = [];
 
-  if (content_type_id) {
+  if (content_type_id && contentType) {
     const { data: ctImageRows } = await sb
       .from("content_type_images")
       .select("url")
@@ -123,15 +162,20 @@ frames.post("/:brandId/frames/generate", async (c) => {
       .order("sort_order", { ascending: true });
 
     if (ctImageRows && ctImageRows.length > 0) {
+      const ctName = contentType.name;
       const fetched = await Promise.all(
-        ctImageRows.map(async (row: { url: string }) => {
+        (ctImageRows as { url: string }[]).map(async (row): Promise<ReferenceImage | null> => {
           try {
             const res = await fetch(row.url);
             if (!res.ok) return null;
             const buffer = await res.arrayBuffer();
             const base64 = Buffer.from(buffer).toString("base64");
-            const ct = res.headers.get("content-type") || "image/jpeg";
-            return { base64, mimeType: ct };
+            const mimeType = res.headers.get("content-type") || "image/jpeg";
+            return {
+              base64,
+              mimeType,
+              label: `content type "${ctName}"`,
+            };
           } catch {
             console.error(`[frames] Failed to fetch content type image: ${row.url}`);
             return null;
@@ -139,12 +183,39 @@ frames.post("/:brandId/frames/generate", async (c) => {
         })
       );
       contentTypeImages = fetched.filter(
-        (img): img is { base64: string; mimeType: string } => img !== null
+        (img): img is ReferenceImage => img !== null
       );
     }
   }
 
-  // Fetch selected skills
+  // Build the generation context once. It is reused for every frame so all 5
+  // frames see the same context block + same template-substituted skills.
+  const ctx = buildGenerationContext({
+    brand: { name: brand.name, description: brand.description ?? null },
+    products: productList.map((p) => ({
+      name: p.name,
+      description: p.description,
+      category: p.category,
+    })),
+    contentType: contentType
+      ? {
+          name: contentType.name,
+          description: contentType.description,
+          image_style: contentType.image_style,
+          image_prompt_template: contentType.image_prompt_template,
+          text_prompt_template: contentType.text_prompt_template,
+          default_aspect_ratio: contentType.default_aspect_ratio,
+        }
+      : null,
+    productImageCount: productImages.length,
+    styleImageCount: contentTypeImages.length,
+    aspectRatio,
+  });
+
+  const contextBlock = renderContextBlock(ctx);
+
+  // Fetch selected skills and run {{...}} template substitution against the
+  // shared context. Done once before the frame loop.
   let skillsContent: string | null = null;
   if (Array.isArray(skill_ids) && skill_ids.length > 0) {
     const { data: skillsData } = await sb
@@ -153,19 +224,22 @@ frames.post("/:brandId/frames/generate", async (c) => {
       .in("id", skill_ids);
 
     if (skillsData && skillsData.length > 0) {
-      skillsContent = skillsData
-        .map((s: { name: string; content: string }) =>
-          `## Skill: ${s.name}\n${s.content}`
-        )
-        .join("\n\n---\n\n");
+      skillsContent = renderSkillsContent(
+        skillsData as { name: string; content: string }[],
+        ctx
+      );
     }
   }
 
-  // Assemble base prompt
+  // Assemble base prompt (unchanged: content type template + image style + user prompt)
   const basePrompt = assemblePrompt(prompt.trim(), contentType);
-  const fullPrompt = skillsContent
-    ? `[SKILLS]\n${skillsContent}\n\n[PROMPT]\n${basePrompt}`
-    : basePrompt;
+  const fullPrompt = [
+    contextBlock,
+    skillsContent ? `[Skills]\n${skillsContent}` : null,
+    `[Prompt]\n${basePrompt}`,
+  ]
+    .filter(Boolean)
+    .join("\n---\n");
 
   // Create frame set record
   const { data: frameSet, error: frameSetError } = await sb
@@ -219,7 +293,8 @@ frames.post("/:brandId/frames/generate", async (c) => {
         contentTypeImages,
         aspectRatio as "1:1" | "9:16",
         skillsContent,
-        prevFrame
+        prevFrame,
+        contextBlock
       );
     } catch (err) {
       console.error(`[frames] Frame ${n} generation failed:`, err);

@@ -6,9 +6,16 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = process.env.GEMINI_MODEL || "google/gemini-3.1-flash-image-preview";
 
-interface ReferenceImage {
+export interface ReferenceImage {
   base64: string; // base64 data (no prefix)
   mimeType: string;
+  /**
+   * Optional per-image label rendered as a `text` block immediately before
+   * the image. Lets the model associate a specific image with a name (e.g.
+   * a product name or a content type name) so skills can refer to it.
+   * If omitted, no label is emitted for this image.
+   */
+  label?: string;
 }
 
 interface GeneratedImage {
@@ -50,7 +57,8 @@ export async function generateImage(
   contentTypeImages: ReferenceImage[] = [],
   aspectRatio: "1:1" | "9:16" = "1:1",
   skillsContent?: string | null,
-  previousFrame?: ReferenceImage | null
+  previousFrame?: ReferenceImage | null,
+  contextBlock?: string | null
 ): Promise<GeneratedImage> {
   if (!OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured");
@@ -62,13 +70,20 @@ export async function generateImage(
     | { type: "image_url"; image_url: { url: string } }
   > = [];
 
-  // Product reference images — sent first (higher impact position)
+  // Product reference images — sent first (higher impact position).
+  // Each image is preceded by its own labeled text block so the model can
+  // associate the image with a specific product name (and skills can refer
+  // to the products by name).
   if (productImages.length > 0) {
     content.push({
       type: "text",
-      text: "The following images are PRODUCT REFERENCE photos. Use them to accurately reproduce the product's appearance, details, and branding:",
+      text: "PRODUCT REFERENCE photos — use these to accurately reproduce each product's appearance, details, and branding:",
     });
     for (const img of productImages) {
+      const label = img.label
+        ? `PRODUCT REFERENCE — ${img.label}:`
+        : "PRODUCT REFERENCE:";
+      content.push({ type: "text", text: label });
       content.push({
         type: "image_url",
         image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
@@ -76,13 +91,19 @@ export async function generateImage(
     }
   }
 
-  // Content type reference images (style examples) — sent after product refs
+  // Content type reference images (style examples) — sent after product refs.
+  // Same per-image labeling so the content type name is attached to its style
+  // references.
   if (contentTypeImages.length > 0) {
     content.push({
       type: "text",
-      text: "The following images are STYLE REFERENCE examples. Use them to understand the visual style, composition, and aesthetic I want:",
+      text: "STYLE REFERENCE examples — use these to understand the visual style, composition, and aesthetic to match:",
     });
     for (const img of contentTypeImages) {
+      const label = img.label
+        ? `STYLE REFERENCE — ${img.label}:`
+        : "STYLE REFERENCE:";
+      content.push({ type: "text", text: label });
       content.push({
         type: "image_url",
         image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
@@ -106,9 +127,19 @@ export async function generateImage(
   content.push({ type: "text", text: prompt });
 
   try {
+    // Compose the system message: generation context block first (so skills
+    // can refer to the actual brand/product/content-type values), then the
+    // assembled skills content. Either part is optional.
+    const systemParts: string[] = [];
+    if (contextBlock) systemParts.push(contextBlock);
+    if (skillsContent) systemParts.push(`[Skills]\n${skillsContent}`);
+
     const messages: Array<{ role: string; content: unknown }> = [];
-    if (skillsContent) {
-      messages.push({ role: "system", content: skillsContent });
+    if (systemParts.length > 0) {
+      messages.push({
+        role: "system",
+        content: systemParts.join("\n---\n"),
+      });
     }
     messages.push({ role: "user", content });
 

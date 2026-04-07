@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth";
 import { createUserClient } from "../lib/supabase";
-import { assemblePrompt, generateImage } from "../lib/gemini";
+import { assemblePrompt, generateImage, type ReferenceImage } from "../lib/gemini";
+import {
+  buildGenerationContext,
+  renderContextBlock,
+} from "../lib/generation-context";
+import { renderSkillsContent } from "../lib/skill-template";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const MIME_TO_EXT: Record<string, string> = {
@@ -44,17 +49,34 @@ images.post("/:brandId/images/generate", async (c) => {
 
   const sb = createUserClient(token);
 
-  // Fetch content type if provided
+  // Fetch brand (for the generation context block)
+  const { data: brand, error: brandError } = await sb
+    .from("brands")
+    .select("name, description")
+    .eq("id", brandId)
+    .single();
+
+  if (brandError || !brand) {
+    return c.json({ error: "Brand not found" }, 404);
+  }
+
+  // Fetch content type if provided. We pull the full set of fields the
+  // generation context needs, on top of the ones used by assemblePrompt().
   let contentType: {
+    name: string;
+    description: string | null;
     image_prompt_template: string | null;
     image_style: string | null;
+    text_prompt_template: string | null;
     default_aspect_ratio: string;
   } | null = null;
 
   if (content_type_id) {
     const { data, error } = await sb
       .from("content_types")
-      .select("image_prompt_template, image_style, default_aspect_ratio")
+      .select(
+        "name, description, image_prompt_template, image_style, text_prompt_template, default_aspect_ratio"
+      )
       .eq("id", content_type_id)
       .single();
 
@@ -71,43 +93,63 @@ images.post("/:brandId/images/generate", async (c) => {
 
   if (!aspectRatio) aspectRatio = "1:1";
 
-  // Fetch product reference images for the brand
-  const { data: products } = await sb
+  // Fetch products with full metadata for both the context block and per-image
+  // labels. We fetch id + name/description/category for ALL brand products,
+  // then narrow to product_ids if the user specified them.
+  const { data: allProducts } = await sb
     .from("brand_products")
-    .select("id")
+    .select("id, name, description, category")
     .eq("brand_id", brandId);
 
-  const productIds = products?.map((p: { id: string }) => p.id) || [];
+  const allProductsList =
+    (allProducts as
+      | {
+          id: string;
+          name: string;
+          description: string | null;
+          category: string | null;
+        }[]
+      | null) || [];
 
-  let productImages: { base64: string; mimeType: string }[] = [];
+  const selectedProducts =
+    product_ids && product_ids.length > 0
+      ? allProductsList.filter((p) => product_ids.includes(p.id))
+      : allProductsList;
 
-  if (productIds.length > 0) {
-    const query = sb
+  const selectedProductIds = selectedProducts.map((p) => p.id);
+  // Index by id so we can attach a name/category label per image.
+  const productById = new Map(selectedProducts.map((p) => [p.id, p]));
+
+  let productImages: ReferenceImage[] = [];
+
+  if (selectedProductIds.length > 0) {
+    const { data: imageRows } = await sb
       .from("brand_product_images")
-      .select("url")
+      .select("url, product_id")
+      .in("product_id", selectedProductIds)
       .order("sort_order", { ascending: true });
 
-    // Filter by specific products if provided, otherwise all brand products
-    if (product_ids && product_ids.length > 0) {
-      query.in("product_id", product_ids);
-    } else {
-      query.in("product_id", productIds);
-    }
-
-    const { data: imageRows } = await query;
-
     if (imageRows && imageRows.length > 0) {
-      // Fetch images in parallel and convert to base64
+      // Fetch images in parallel and convert to base64. Each image carries
+      // its source product's name + category as a label so the model can
+      // associate the image with a specific product.
       const fetched = await Promise.all(
-        imageRows.map(async (row: { url: string }) => {
+        (imageRows as { url: string; product_id: string }[]).map(async (row): Promise<ReferenceImage | null> => {
           try {
             const res = await fetch(row.url);
             if (!res.ok) return null;
             const buffer = await res.arrayBuffer();
             const base64 = Buffer.from(buffer).toString("base64");
-            const contentType =
+            const mimeType =
               res.headers.get("content-type") || "image/jpeg";
-            return { base64, mimeType: contentType };
+            const product = productById.get(row.product_id);
+            const ref: ReferenceImage = { base64, mimeType };
+            if (product) {
+              ref.label = product.category
+                ? `"${product.name}" (${product.category})`
+                : `"${product.name}"`;
+            }
+            return ref;
           } catch {
             console.error(
               `[images] Failed to fetch reference image: ${row.url}`
@@ -117,15 +159,17 @@ images.post("/:brandId/images/generate", async (c) => {
         })
       );
       productImages = fetched.filter(
-        (img): img is { base64: string; mimeType: string } => img !== null
+        (img): img is ReferenceImage => img !== null
       );
     }
   }
 
-  // Fetch content type reference images (style examples)
-  let contentTypeImages: { base64: string; mimeType: string }[] = [];
+  // Fetch content type reference images (style examples). Each image is
+  // labeled with the content type name so the model can tie style refs to
+  // a specific content type.
+  let contentTypeImages: ReferenceImage[] = [];
 
-  if (content_type_id) {
+  if (content_type_id && contentType) {
     const { data: ctImageRows } = await sb
       .from("content_type_images")
       .select("url")
@@ -133,15 +177,20 @@ images.post("/:brandId/images/generate", async (c) => {
       .order("sort_order", { ascending: true });
 
     if (ctImageRows && ctImageRows.length > 0) {
+      const ctName = contentType.name;
       const fetched = await Promise.all(
-        ctImageRows.map(async (row: { url: string }) => {
+        (ctImageRows as { url: string }[]).map(async (row): Promise<ReferenceImage | null> => {
           try {
             const res = await fetch(row.url);
             if (!res.ok) return null;
             const buffer = await res.arrayBuffer();
             const base64 = Buffer.from(buffer).toString("base64");
-            const ct = res.headers.get("content-type") || "image/jpeg";
-            return { base64, mimeType: ct };
+            const mimeType = res.headers.get("content-type") || "image/jpeg";
+            return {
+              base64,
+              mimeType,
+              label: `content type "${ctName}"`,
+            };
           } catch {
             console.error(`[images] Failed to fetch content type image: ${row.url}`);
             return null;
@@ -149,12 +198,40 @@ images.post("/:brandId/images/generate", async (c) => {
         })
       );
       contentTypeImages = fetched.filter(
-        (img): img is { base64: string; mimeType: string } => img !== null
+        (img): img is ReferenceImage => img !== null
       );
     }
   }
 
-  // Fetch selected skills (if any)
+  // Build the generation context now that we know everything that will be
+  // sent to the model. Used for both renderContextBlock() and skill template
+  // substitution so the two views stay in sync.
+  const ctx = buildGenerationContext({
+    brand: { name: brand.name, description: brand.description ?? null },
+    products: selectedProducts.map((p) => ({
+      name: p.name,
+      description: p.description,
+      category: p.category,
+    })),
+    contentType: contentType
+      ? {
+          name: contentType.name,
+          description: contentType.description,
+          image_style: contentType.image_style,
+          image_prompt_template: contentType.image_prompt_template,
+          text_prompt_template: contentType.text_prompt_template,
+          default_aspect_ratio: contentType.default_aspect_ratio,
+        }
+      : null,
+    productImageCount: productImages.length,
+    styleImageCount: contentTypeImages.length,
+    aspectRatio,
+  });
+
+  const contextBlock = renderContextBlock(ctx);
+
+  // Fetch selected skills (if any) and run {{...}} template substitution
+  // against the generation context before concatenation.
   let skillsContent: string | null = null;
   if (Array.isArray(skill_ids) && skill_ids.length > 0) {
     const { data: skillsData } = await sb
@@ -163,15 +240,15 @@ images.post("/:brandId/images/generate", async (c) => {
       .in("id", skill_ids);
 
     if (skillsData && skillsData.length > 0) {
-      skillsContent = skillsData
-        .map((s: { name: string; content: string }) =>
-          `## Skill: ${s.name}\n${s.content}`
-        )
-        .join("\n\n---\n\n");
+      skillsContent = renderSkillsContent(
+        skillsData as { name: string; content: string }[],
+        ctx
+      );
     }
   }
 
-  // Assemble prompt
+  // Assemble user-message text prompt (unchanged: content type template +
+  // image style + user prompt).
   const fullPrompt = assemblePrompt(prompt.trim(), contentType);
 
   // Generate image via OpenRouter/Gemini
@@ -182,7 +259,9 @@ images.post("/:brandId/images/generate", async (c) => {
       productImages,
       contentTypeImages,
       aspectRatio as "1:1" | "9:16",
-      skillsContent
+      skillsContent,
+      null,
+      contextBlock
     );
   } catch (err) {
     console.error("[images] Generation failed:", err);
@@ -224,9 +303,13 @@ images.post("/:brandId/images/generate", async (c) => {
       brand_id: brandId,
       content_type_id: content_type_id || null,
       prompt: prompt.trim(),
-      full_prompt: skillsContent
-        ? `[SKILLS]\n${skillsContent}\n\n[PROMPT]\n${fullPrompt}`
-        : fullPrompt,
+      full_prompt: [
+        contextBlock,
+        skillsContent ? `[Skills]\n${skillsContent}` : null,
+        `[Prompt]\n${fullPrompt}`,
+      ]
+        .filter(Boolean)
+        .join("\n---\n"),
       aspect_ratio: aspectRatio,
       storage_path: storagePath,
       url: publicUrl,

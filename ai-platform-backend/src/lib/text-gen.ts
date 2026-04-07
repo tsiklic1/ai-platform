@@ -2,27 +2,28 @@
  * Text generation via OpenRouter (Claude).
  */
 
+import {
+  renderContextBlock,
+  type GenerationContext,
+} from "./generation-context";
+
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions";
 const TEXT_MODEL = process.env.TEXT_MODEL || "anthropic/claude-sonnet-4";
 
-interface ContentTypeForTextPrompt {
-  text_prompt_template: string | null;
-  name: string;
-}
-
-interface BrandContext {
-  brandName: string;
-  products: { name: string; description: string | null; category: string | null }[];
-}
-
 /**
  * Assemble system + user prompts for caption generation.
+ *
+ * The shape is: role lines → [Generation Context] block (shared with image &
+ * frames flows via renderContextBlock) → [Skills] (if any) → user prompt.
+ *
+ * Skills passed in here are expected to be PRE-PROCESSED — i.e. {{...}}
+ * placeholders should already have been substituted by the caller via
+ * renderSkillsContent(). This function only concatenates.
  */
 export function assembleTextPrompt(
   userPrompt: string,
-  contentType?: ContentTypeForTextPrompt | null,
-  brandContext?: BrandContext | null,
+  ctx: GenerationContext,
   skillsContent?: string | null
 ): { systemPrompt: string; userPrompt: string; fullPrompt: string } {
   const systemParts: string[] = [
@@ -31,25 +32,12 @@ export function assembleTextPrompt(
     "Return ONLY the caption text — no titles, labels, or meta-commentary.",
   ];
 
+  systemParts.push(""); // blank line before context block
+  systemParts.push(renderContextBlock(ctx));
+
   if (skillsContent) {
-    systemParts.push(`\n--- Skills & Guidelines ---\n${skillsContent}`);
-  }
-
-  if (brandContext) {
-    systemParts.push(`\nBrand: ${brandContext.brandName}`);
-    if (brandContext.products.length > 0) {
-      systemParts.push("Products:");
-      for (const p of brandContext.products) {
-        const parts = [p.name];
-        if (p.description) parts.push(p.description);
-        if (p.category) parts.push(`(${p.category})`);
-        systemParts.push(`- ${parts.join(": ")}`);
-      }
-    }
-  }
-
-  if (contentType?.text_prompt_template) {
-    systemParts.push(`\nContent type "${contentType.name}" instructions:\n${contentType.text_prompt_template}`);
+    systemParts.push("---");
+    systemParts.push(`[Skills]\n${skillsContent}`);
   }
 
   const systemPrompt = systemParts.join("\n");

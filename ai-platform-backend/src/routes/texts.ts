@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth";
 import { createUserClient } from "../lib/supabase";
 import { assembleTextPrompt, generateText } from "../lib/text-gen";
+import { buildGenerationContext } from "../lib/generation-context";
+import { renderSkillsContent } from "../lib/skill-template";
 
 const texts = new Hono<{
   Variables: { token: string; user: { id: string; email: string } };
@@ -27,10 +29,10 @@ texts.post("/:brandId/texts/generate", async (c) => {
     return c.json({ error: "prompt is required" }, 400);
   }
 
-  // Fetch brand name
+  // Fetch brand
   const { data: brand, error: brandError } = await sb
     .from("brands")
-    .select("name")
+    .select("name, description")
     .eq("id", brandId)
     .single();
 
@@ -44,17 +46,27 @@ texts.post("/:brandId/texts/generate", async (c) => {
     .select("name, description, category")
     .eq("brand_id", brandId);
 
-  const brandContext = {
-    brandName: brand.name,
-    products: (products || []) as { name: string; description: string | null; category: string | null }[],
-  };
+  const productList =
+    (products as
+      | { name: string; description: string | null; category: string | null }[]
+      | null) || [];
 
-  // Fetch content type if provided
-  let contentType: { text_prompt_template: string | null; name: string } | null = null;
+  // Fetch content type if provided. Pull the full set of fields the
+  // generation context needs so {{content_type.*}} placeholders work.
+  let contentType: {
+    name: string;
+    description: string | null;
+    image_style: string | null;
+    image_prompt_template: string | null;
+    text_prompt_template: string | null;
+    default_aspect_ratio: string | null;
+  } | null = null;
   if (content_type_id) {
     const { data, error } = await sb
       .from("content_types")
-      .select("name, text_prompt_template")
+      .select(
+        "name, description, image_style, image_prompt_template, text_prompt_template, default_aspect_ratio"
+      )
       .eq("id", content_type_id)
       .single();
 
@@ -64,7 +76,28 @@ texts.post("/:brandId/texts/generate", async (c) => {
     contentType = data;
   }
 
-  // Fetch selected skills (if any)
+  // Build the shared generation context. Text gen has no images attached,
+  // and aspect ratio is not meaningful here.
+  const ctx = buildGenerationContext({
+    brand: { name: brand.name, description: brand.description ?? null },
+    products: productList,
+    contentType: contentType
+      ? {
+          name: contentType.name,
+          description: contentType.description,
+          image_style: contentType.image_style,
+          image_prompt_template: contentType.image_prompt_template,
+          text_prompt_template: contentType.text_prompt_template,
+          default_aspect_ratio: contentType.default_aspect_ratio,
+        }
+      : null,
+    productImageCount: 0,
+    styleImageCount: 0,
+    aspectRatio: null,
+  });
+
+  // Fetch selected skills (if any) and run {{...}} template substitution
+  // against the generation context.
   let skillsContent: string | null = null;
   if (Array.isArray(skill_ids) && skill_ids.length > 0) {
     const { data: skillsData } = await sb
@@ -73,19 +106,17 @@ texts.post("/:brandId/texts/generate", async (c) => {
       .in("id", skill_ids);
 
     if (skillsData && skillsData.length > 0) {
-      skillsContent = skillsData
-        .map((s: { name: string; content: string }) =>
-          `## Skill: ${s.name}\n${s.content}`
-        )
-        .join("\n\n---\n\n");
+      skillsContent = renderSkillsContent(
+        skillsData as { name: string; content: string }[],
+        ctx
+      );
     }
   }
 
   // Assemble prompt
   const { systemPrompt, userPrompt, fullPrompt } = assembleTextPrompt(
     prompt.trim(),
-    contentType,
-    brandContext,
+    ctx,
     skillsContent
   );
 
