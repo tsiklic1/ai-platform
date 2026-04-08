@@ -565,7 +565,13 @@ Non-priority items to discuss once core stages are complete.
 
 ---
 
-### BL-003: Group sidebar navigation into logical sections
+### BL-003: Group sidebar navigation into logical sections — ✅ DONE (2026-04-08)
+
+**Status**: Shipped. `ai-platform-frontend/src/components/Sidebar.tsx` now renders two labeled groups: **Brand Setup** (Manage Brands, Brand Identity, Content Types, Skills) and **Generated Content** (Pictures, Captions, Video Frames, Videos). Tasks link / "Other" section skipped — no Tasks link exists in the sidebar today.
+
+---
+
+### BL-003 (original spec, kept for history): Group sidebar navigation into logical sections
 
 **Description**: The sidebar currently lists all nav links in a flat list: Skills, Tasks, Content Types, Pictures, Text, Video Frames, Videos, Brand Identity, Manage Brands. These should be grouped into two visible sections with labels:
 
