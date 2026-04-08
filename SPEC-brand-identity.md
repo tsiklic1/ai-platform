@@ -608,7 +608,13 @@ Each group should have a small muted label (e.g. `text-xs text-gray-500 uppercas
 
 ---
 
-### BL-005: Filter gallery by content type
+### BL-005: Filter gallery by content type — ✅ DONE (2026-04-08)
+
+**Status**: Shipped. `GET /brands/:brandId/images` accepts an optional `content_type_id` query param. Frontend Images page renders a filter dropdown above the gallery; selecting a content type re-fetches scoped to it. Filter is independent of the generation form's content type selector and resets on brand change.
+
+---
+
+### BL-005 (original spec, kept for history): Filter gallery by content type
 
 **Description**: The generated images gallery currently shows all images for the brand. A content type filter dropdown above the gallery would let users filter to see only images generated with a specific content type (e.g. only "Product Showcase" images).
 
