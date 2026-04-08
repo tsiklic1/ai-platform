@@ -17,6 +17,14 @@ function SidebarLink({ to, children }: { to: string; children: React.ReactNode }
   )
 }
 
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs text-gray-500 uppercase tracking-wider px-3 pt-3 pb-1">
+      {children}
+    </p>
+  )
+}
+
 export function Sidebar() {
   const { user, logout } = useAuth()
 
@@ -26,15 +34,22 @@ export function Sidebar() {
         <BrandSwitcher />
       </div>
 
-      <nav className="flex flex-col gap-1 flex-1">
-        <SidebarLink to="/skills">Skills</SidebarLink>
-        <SidebarLink to="/contentTypes">Content Types</SidebarLink>
-        <SidebarLink to="/images">Pictures</SidebarLink>
-        <SidebarLink to="/captions">Captions</SidebarLink>
-        <SidebarLink to="/frames">Video Frames</SidebarLink>
-        <SidebarLink to="/videos">Videos</SidebarLink>
-        <SidebarLink to="/identity">Brand Identity</SidebarLink>
-        <SidebarLink to="/brands">Manage Brands</SidebarLink>
+      <nav className="flex flex-col flex-1">
+        <SectionLabel>Brand Setup</SectionLabel>
+        <div className="flex flex-col gap-1">
+          <SidebarLink to="/brands">Manage Brands</SidebarLink>
+          <SidebarLink to="/identity">Brand Identity</SidebarLink>
+          <SidebarLink to="/contentTypes">Content Types</SidebarLink>
+          <SidebarLink to="/skills">Skills</SidebarLink>
+        </div>
+
+        <SectionLabel>Generated Content</SectionLabel>
+        <div className="flex flex-col gap-1">
+          <SidebarLink to="/images">Pictures</SidebarLink>
+          <SidebarLink to="/captions">Captions</SidebarLink>
+          <SidebarLink to="/frames">Video Frames</SidebarLink>
+          <SidebarLink to="/videos">Videos</SidebarLink>
+        </div>
       </nav>
 
       <div className="border-t border-gray-700 pt-3 mt-3 px-3">
