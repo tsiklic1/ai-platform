@@ -536,18 +536,20 @@ Stages 2 and 3 can be parallelized if two devs are available — they only depen
 
 Non-priority items to discuss once core stages are complete.
 
-### BL-001: Storage cleanup on brand/product/image delete
+### BL-001: Storage cleanup on brand/product/image delete — ✅ DONE (2026-04-07)
 
-**Description**: Currently, deleting a brand, product, or individual image only removes database rows (via CASCADE). The actual image files in Supabase Storage (`brand-assets` bucket) are **not** cleaned up — they become orphaned blobs taking up storage space.
+**Status**: Shipped. Every DELETE endpoint now removes associated storage files from the `brand-assets` bucket before (or alongside) the DB delete. All paths routed through a single helper at `ai-platform-backend/src/lib/storage-cleanup.ts` with log-and-proceed error handling.
 
-**What needs to happen**:
-- **Brand delete**: Before DB delete, remove all files under `{user_id}/products/*` that belong to the brand's products, and `{user_id}/generated/{brand_id}/*` for any generated images.
-- **Product delete**: Before DB delete, remove all files under `{user_id}/products/{product_id}/*`.
-- **Single image delete**: Remove the specific file from storage at the path stored in `brand_product_images.storage_path` before deleting the DB row.
+**Wired endpoints**:
+- `DELETE /brands/:id` — `collectBrandStoragePaths` (product images + content type images + generated images + generated frames, all in parallel)
+- `DELETE /brands/:brandId/products/:id` — `collectProductStoragePaths`
+- `DELETE /brands/:brandId/products/:productId/images/:imageId` — single path fetch
+- `DELETE /brands/:brandId/content-types/:id` — `collectContentTypeStoragePaths`
+- `DELETE /brands/:brandId/content-types/:id/images/:imageId` — single path fetch
+- `DELETE /brands/:brandId/images/:id` — single path fetch
+- `DELETE /brands/:brandId/frames/:id` — refactored to use `collectFrameSetStoragePaths`
 
-**Why deferred**: No images exist in storage yet (Stage 1 had no uploads). Once Stage 2 is live and users are uploading, this becomes important to prevent storage bloat and cost. Not blocking any functionality — just a cleanup concern.
-
-**Storage paths follow the pattern**: `{user_id}/products/{product_id}/{uuid}.{ext}` for product images, `{user_id}/generated/{brand_id}/{timestamp}_{hash}.png` for generated images.
+**Out of scope (intentionally)**: Backfill of existing orphaned files. Only new deletes from now on are cleaned up.
 
 ---
 

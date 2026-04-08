@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth";
 import { createUserClient } from "../lib/supabase";
+import {
+  collectContentTypeStoragePaths,
+  deleteStorageFiles,
+} from "../lib/storage-cleanup";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -182,15 +186,19 @@ contentTypes.put("/:brandId/content-types/:id", async (c) => {
   return c.json({ contentType: data });
 });
 
-// Delete content type
+// Delete content type (cascade handles image rows; we also clean up storage)
 contentTypes.delete("/:brandId/content-types/:id", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+  const contentTypeId = c.req.param("id");
+
+  const paths = await collectContentTypeStoragePaths(sb, contentTypeId);
+  await deleteStorageFiles(sb, paths, `content type ${contentTypeId}`);
 
   const { error } = await sb
     .from("content_types")
     .delete()
-    .eq("id", c.req.param("id"));
+    .eq("id", contentTypeId);
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ message: "Deleted" });
@@ -266,15 +274,30 @@ contentTypes.post("/:brandId/content-types/:id/images", async (c) => {
   return c.json({ image: data }, 201);
 });
 
-// Delete reference image from a content type
+// Delete reference image from a content type (storage file + DB row)
 contentTypes.delete("/:brandId/content-types/:id/images/:imageId", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+  const imageId = c.req.param("imageId");
+
+  const { data: imageRow } = await sb
+    .from("content_type_images")
+    .select("storage_path")
+    .eq("id", imageId)
+    .single();
+
+  if (imageRow?.storage_path) {
+    await deleteStorageFiles(
+      sb,
+      [imageRow.storage_path],
+      `content type image ${imageId}`
+    );
+  }
 
   const { error } = await sb
     .from("content_type_images")
     .delete()
-    .eq("id", c.req.param("imageId"));
+    .eq("id", imageId);
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ message: "Deleted" });

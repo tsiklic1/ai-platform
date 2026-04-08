@@ -2,6 +2,10 @@ import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth";
 import { createUserClient } from "../lib/supabase";
 import { getDefaultContentTypes } from "../lib/default-content-types";
+import {
+  collectBrandStoragePaths,
+  deleteStorageFiles,
+} from "../lib/storage-cleanup";
 
 const brands = new Hono();
 brands.use("*", authMiddleware);
@@ -142,15 +146,20 @@ brands.put("/:id", async (c) => {
   return c.json({ brand: data });
 });
 
-// Delete brand (cascade handles related rows)
+// Delete brand (cascade handles related rows; we also clean up storage)
 brands.delete("/:id", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+  const brandId = c.req.param("id");
+
+  // Collect every storage path under this brand BEFORE the cascade fires.
+  const paths = await collectBrandStoragePaths(sb, brandId);
+  await deleteStorageFiles(sb, paths, `brand ${brandId}`);
 
   const { error } = await sb
     .from("brands")
     .delete()
-    .eq("id", c.req.param("id"));
+    .eq("id", brandId);
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ message: "Deleted" });

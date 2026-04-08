@@ -7,6 +7,7 @@ import {
   renderContextBlock,
 } from "../lib/generation-context";
 import { renderSkillsContent } from "../lib/skill-template";
+import { deleteStorageFiles } from "../lib/storage-cleanup";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const MIME_TO_EXT: Record<string, string> = {
@@ -377,15 +378,30 @@ images.get("/:brandId/images/:id", async (c) => {
   return c.json({ image: data });
 });
 
-// Delete generated image (DB only; storage cleanup deferred BL-001)
+// Delete generated image (storage file + DB row)
 images.delete("/:brandId/images/:id", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+  const imageId = c.req.param("id");
+
+  const { data: imageRow } = await sb
+    .from("generated_images")
+    .select("storage_path")
+    .eq("id", imageId)
+    .single();
+
+  if (imageRow?.storage_path) {
+    await deleteStorageFiles(
+      sb,
+      [imageRow.storage_path],
+      `generated image ${imageId}`
+    );
+  }
 
   const { error } = await sb
     .from("generated_images")
     .delete()
-    .eq("id", c.req.param("id"));
+    .eq("id", imageId);
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ message: "Deleted" });

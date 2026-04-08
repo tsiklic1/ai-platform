@@ -11,6 +11,10 @@ import {
   generateFrameStoryboard,
   type FrameStoryboard,
 } from "../lib/frame-storyboard";
+import {
+  collectFrameSetStoragePaths,
+  deleteStorageFiles,
+} from "../lib/storage-cleanup";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const MIME_TO_EXT: Record<string, string> = {
@@ -532,24 +536,17 @@ frames.get("/:brandId/frames/:id", async (c) => {
 frames.delete("/:brandId/frames/:id", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+  const frameSetId = c.req.param("id");
 
-  // Fetch frames to get storage paths
-  const { data: framesList } = await sb
-    .from("generated_frames")
-    .select("storage_path")
-    .eq("frame_set_id", c.req.param("id"));
-
-  // Delete storage files
-  if (framesList && framesList.length > 0) {
-    const paths = framesList.map((f: { storage_path: string }) => f.storage_path);
-    await sb.storage.from("brand-assets").remove(paths);
-  }
+  // Clean up storage before DB delete — helper logs and swallows failures.
+  const paths = await collectFrameSetStoragePaths(sb, frameSetId);
+  await deleteStorageFiles(sb, paths, `frame set ${frameSetId}`);
 
   // Delete frame set (CASCADE deletes frames)
   const { error } = await sb
     .from("generated_frame_sets")
     .delete()
-    .eq("id", c.req.param("id"));
+    .eq("id", frameSetId);
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ message: "Deleted" });

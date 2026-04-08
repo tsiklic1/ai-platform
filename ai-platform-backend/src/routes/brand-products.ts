@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { authMiddleware } from "../middleware/auth";
 import { createUserClient } from "../lib/supabase";
+import {
+  collectProductStoragePaths,
+  deleteStorageFiles,
+} from "../lib/storage-cleanup";
 
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -123,15 +127,20 @@ brandProducts.put("/:brandId/products/:id", async (c) => {
   return c.json({ product: data });
 });
 
-// Delete product (cascade handles images rows; storage cleanup deferred BL-001)
+// Delete product (cascade handles image rows; we also clean up storage)
 brandProducts.delete("/:brandId/products/:id", async (c) => {
   const token = c.get("token");
   const sb = createUserClient(token);
+  const productId = c.req.param("id");
+
+  // Clean up storage before DB delete.
+  const paths = await collectProductStoragePaths(sb, productId);
+  await deleteStorageFiles(sb, paths, `product ${productId}`);
 
   const { error } = await sb
     .from("brand_products")
     .delete()
-    .eq("id", c.req.param("id"));
+    .eq("id", productId);
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ message: "Deleted" });
@@ -230,17 +239,33 @@ brandProducts.post(
   }
 );
 
-// Delete image (DB row only; storage cleanup deferred BL-001)
+// Delete image (storage file + DB row)
 brandProducts.delete(
   "/:brandId/products/:productId/images/:imageId",
   async (c) => {
     const token = c.get("token");
     const sb = createUserClient(token);
+    const imageId = c.req.param("imageId");
+
+    // Fetch the storage_path before deleting the row.
+    const { data: imageRow } = await sb
+      .from("brand_product_images")
+      .select("storage_path")
+      .eq("id", imageId)
+      .single();
+
+    if (imageRow?.storage_path) {
+      await deleteStorageFiles(
+        sb,
+        [imageRow.storage_path],
+        `product image ${imageId}`
+      );
+    }
 
     const { error } = await sb
       .from("brand_product_images")
       .delete()
-      .eq("id", c.req.param("imageId"));
+      .eq("id", imageId);
 
     if (error) return c.json({ error: error.message }, 400);
     return c.json({ message: "Deleted" });
