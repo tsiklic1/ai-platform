@@ -5,6 +5,7 @@ import {
   collectContentTypeStoragePaths,
   deleteStorageFiles,
 } from "../lib/storage-cleanup";
+import { getDefaultContentTypes } from "../lib/default-content-types";
 
 const VALID_ASPECT_RATIOS = ["1:1", "9:16"];
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -34,6 +35,59 @@ contentTypes.get("/:brandId/content-types", async (c) => {
 
   if (error) return c.json({ error: error.message }, 400);
   return c.json({ contentTypes: data });
+});
+
+// Reset all content types for a brand back to the 5 seeded defaults.
+// DESTRUCTIVE — wipes both default and custom content types (and their
+// reference images in storage) before re-seeding. Must be registered
+// before the "/:id" routes so the literal "reset-defaults" segment is
+// never matched as an :id param.
+contentTypes.post("/:brandId/content-types/reset-defaults", async (c) => {
+  const token = c.get("token");
+  const user = c.get("user");
+  const brandId = c.req.param("brandId");
+  const sb = createUserClient(token);
+
+  // Collect every content_type_image storage_path under this brand before
+  // the delete cascade fires. brand_id lives on content_types, not on the
+  // images table, so resolve ids first then fan out.
+  const { data: ctRows, error: ctErr } = await sb
+    .from("content_types")
+    .select("id")
+    .eq("brand_id", brandId);
+  if (ctErr) return c.json({ error: ctErr.message }, 400);
+
+  const ctIds = (ctRows ?? []).map((r: { id: string }) => r.id);
+  const paths: string[] = [];
+  if (ctIds.length > 0) {
+    const { data: imgs, error: imgErr } = await sb
+      .from("content_type_images")
+      .select("storage_path")
+      .in("content_type_id", ctIds);
+    if (imgErr) return c.json({ error: imgErr.message }, 400);
+    for (const row of imgs ?? []) {
+      if (row.storage_path) paths.push(row.storage_path);
+    }
+  }
+  await deleteStorageFiles(sb, paths, `reset-defaults brand ${brandId}`);
+
+  // Wipe all content types for the brand (cascade clears image rows).
+  const { error: delErr } = await sb
+    .from("content_types")
+    .delete()
+    .eq("brand_id", brandId);
+  if (delErr) return c.json({ error: delErr.message }, 400);
+
+  // Re-seed the 5 defaults.
+  const defaults = getDefaultContentTypes(brandId, user.id);
+  const { data: inserted, error: insErr } = await sb
+    .from("content_types")
+    .insert(defaults)
+    .select("id, name, description, default_aspect_ratio, is_default, sort_order")
+    .order("sort_order", { ascending: true });
+  if (insErr) return c.json({ error: insErr.message }, 400);
+
+  return c.json({ contentTypes: inserted });
 });
 
 // Get full content type (with templates)

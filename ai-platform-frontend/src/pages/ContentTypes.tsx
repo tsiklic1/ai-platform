@@ -368,6 +368,7 @@ export default function ContentTypes() {
   const [contentTypes, setContentTypes] = useState<ContentTypeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
 
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -405,6 +406,28 @@ export default function ContentTypes() {
     setLoading(true);
     fetchContentTypes();
   }, [fetchContentTypes]);
+
+  // Reset all content types to the 5 seeded defaults (destructive)
+  const handleResetDefaults = async () => {
+    if (!token || !brandId) return;
+    const confirmed = window.confirm(
+      "Reset all content types to defaults?\n\nThis will permanently delete ALL content types for this brand (including any custom ones you've created and any reference images) and re-create the 5 starter templates. This cannot be undone."
+    );
+    if (!confirmed) return;
+    setResetting(true);
+    setError(null);
+    try {
+      const data = await api<{ contentTypes: ContentTypeSummary[] }>(
+        `/brands/${brandId}/content-types/reset-defaults`,
+        { method: "POST", token }
+      );
+      setContentTypes(data.contentTypes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reset failed");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   // Open sidebar for new content type
   const handleNew = () => {
@@ -532,6 +555,14 @@ export default function ContentTypes() {
             Define how your brand's content should be generated.
           </p>
         </div>
+        <button
+          onClick={handleResetDefaults}
+          disabled={resetting}
+          className="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          title="Delete all content types and re-create the 5 starter templates"
+        >
+          {resetting ? "Resetting..." : "Reset to defaults"}
+        </button>
       </div>
 
       {/* Error banner */}
