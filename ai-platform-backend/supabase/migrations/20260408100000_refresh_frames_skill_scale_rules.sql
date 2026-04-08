@@ -1,3 +1,5 @@
+UPDATE skills
+SET content = $MD$
 ---
 name: default-frames
 description: Default guidelines applied to every sequential video frame generation. Covers continuity, gradual progression, lighting consistency, and prompt structure so generated frames work as keyframes for video tools like SeedDance, Runway, or Kling.
@@ -186,3 +188,5 @@ Don't overengineer this. The frames do the heavy lifting — the video prompt ju
 - Don't try to animate complex human motion in frame-by-frame mode.
 - Don't mix aspect ratios within a single set.
 - Don't ignore lighting drift — it looks worse when animated than when static.
+$MD$
+WHERE is_default = true AND name = 'Default Frames Guidelines';
