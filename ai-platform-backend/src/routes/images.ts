@@ -326,7 +326,7 @@ images.post("/:brandId/images/generate", async (c) => {
   return c.json({ image: imageRecord }, 201);
 });
 
-// List generated images (paginated)
+// List generated images (paginated, optional content type filter)
 images.get("/:brandId/images", async (c) => {
   const token = c.get("token");
   const brandId = c.req.param("brandId");
@@ -334,24 +334,33 @@ images.get("/:brandId/images", async (c) => {
   const page = Math.max(1, parseInt(c.req.query("page") || "1"));
   const limit = Math.min(50, Math.max(1, parseInt(c.req.query("limit") || "20")));
   const offset = (page - 1) * limit;
+  const contentTypeFilter = c.req.query("content_type_id") || null;
 
   const sb = createUserClient(token);
 
   // Get total count
-  const { count, error: countError } = await sb
+  let countQuery = sb
     .from("generated_images")
     .select("id", { count: "exact", head: true })
     .eq("brand_id", brandId);
+  if (contentTypeFilter) {
+    countQuery = countQuery.eq("content_type_id", contentTypeFilter);
+  }
+  const { count, error: countError } = await countQuery;
 
   if (countError) return c.json({ error: countError.message }, 400);
 
   // Get page
-  const { data, error } = await sb
+  let dataQuery = sb
     .from("generated_images")
     .select("id, prompt, aspect_ratio, content_type_id, url, created_at")
     .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
+  if (contentTypeFilter) {
+    dataQuery = dataQuery.eq("content_type_id", contentTypeFilter);
+  }
+  const { data, error } = await dataQuery;
 
   if (error) return c.json({ error: error.message }, 400);
 

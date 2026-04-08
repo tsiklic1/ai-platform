@@ -25,6 +25,11 @@ interface GeneratedImageFull extends GeneratedImage {
   storage_path: string;
 }
 
+interface ContentTypeSummary {
+  id: string;
+  name: string;
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 function timeAgo(dateStr: string): string {
@@ -228,6 +233,10 @@ export default function Images() {
   const [page, setPage] = useState(1);
   const [loadingGallery, setLoadingGallery] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [filterContentTypeId, setFilterContentTypeId] = useState<string>("");
+  const [filterContentTypes, setFilterContentTypes] = useState<
+    ContentTypeSummary[]
+  >([]);
 
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -246,12 +255,19 @@ export default function Images() {
         return;
       }
       try {
+        const params = new URLSearchParams({
+          page: String(pageNum),
+          limit: String(PAGE_SIZE),
+        });
+        if (filterContentTypeId) {
+          params.set("content_type_id", filterContentTypeId);
+        }
         const data = await api<{
           images: GeneratedImage[];
           total: number;
           page: number;
           limit: number;
-        }>(`/brands/${brandId}/images?page=${pageNum}&limit=${PAGE_SIZE}`, {
+        }>(`/brands/${brandId}/images?${params.toString()}`, {
           token,
         });
         if (append) {
@@ -268,16 +284,36 @@ export default function Images() {
         setLoadingMore(false);
       }
     },
-    [token, brandId]
+    [token, brandId, filterContentTypeId]
   );
 
+  // Reset form + filter when brand changes
   useEffect(() => {
-    setLoadingGallery(true);
-    setPage(1);
     setContentTypeId(null);
     setPrompt("");
     setAspectRatio("1:1");
     setSelectedSkillIds([]);
+    setFilterContentTypeId("");
+  }, [brandId]);
+
+  // Fetch filter dropdown options when brand changes
+  useEffect(() => {
+    if (!token || !brandId) {
+      setFilterContentTypes([]);
+      return;
+    }
+    api<{ contentTypes: ContentTypeSummary[] }>(
+      `/brands/${brandId}/content-types`,
+      { token }
+    )
+      .then((data) => setFilterContentTypes(data.contentTypes))
+      .catch((err) => console.error("Failed to fetch content types:", err));
+  }, [token, brandId]);
+
+  // Refetch gallery whenever brand or filter changes
+  useEffect(() => {
+    setLoadingGallery(true);
+    setPage(1);
     fetchImages(1);
   }, [fetchImages]);
 
@@ -388,6 +424,27 @@ export default function Images() {
     <div className="relative min-h-[calc(100vh-2rem)]">
       {/* Gallery Background */}
       <div className="pb-64">
+        {/* Filter bar */}
+        {filterContentTypes.length > 0 && (
+          <div className="flex items-center gap-2 mb-4">
+            <label className="text-xs font-medium text-gray-500">
+              Filter by content type
+            </label>
+            <select
+              value={filterContentTypeId}
+              onChange={(e) => setFilterContentTypeId(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            >
+              <option value="">All</option>
+              {filterContentTypes.map((ct) => (
+                <option key={ct.id} value={ct.id}>
+                  {ct.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {loadingGallery ? (
           <div className="text-gray-400 text-sm py-24 text-center">
             Loading images...
@@ -396,10 +453,14 @@ export default function Images() {
           <div className="text-center py-24">
             <div className="text-5xl mb-4 opacity-50">🖼️</div>
             <h3 className="text-lg font-medium text-gray-400 mb-1">
-              No images generated yet
+              {filterContentTypeId
+                ? "No images for this content type"
+                : "No images generated yet"}
             </h3>
             <p className="text-gray-400 text-sm">
-              Use the prompt below to create your first image.
+              {filterContentTypeId
+                ? "Try a different filter or generate one below."
+                : "Use the prompt below to create your first image."}
             </p>
           </div>
         ) : (
