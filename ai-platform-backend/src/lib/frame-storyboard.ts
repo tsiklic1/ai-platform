@@ -8,6 +8,7 @@
 import { generateText } from "./text-gen";
 import {
   renderContextBlock,
+  type GenContextProduct,
   type GenerationContext,
 } from "./generation-context";
 
@@ -36,8 +37,13 @@ function buildSystemPrompt(
     "- Only 1-2 things should change between consecutive frames.",
     "- Respect any skills below — especially label-text preservation (every letter on the product must stay identical across all frames).",
     "",
-    "Product authority:",
-    "- The [Generation Context] product list is AUTHORITATIVE. Reference ONLY products that appear in that list, by their exact names. Do NOT invent additional products, variants, flavors, sizes, colors, or sub-brands that are not listed there. If the context lists one product, the storyboard must use exactly that one product.",
+    "Product authority (HARD RULES — read carefully):",
+    "- The [Generation Context] product list below is AUTHORITATIVE and EXCLUSIVE. Reference ONLY products that appear there, by their EXACT canonical names.",
+    "- Do NOT invent additional products, variants, flavors, sizes, editions, colors, or sub-brands. Never follow a canonical product name with an extra capitalized word that isn't in the catalog. Example: if the catalog contains \"Foo\", writing \"Foo Deluxe\" or \"Foo Tropical\" is FORBIDDEN — that's inventing a variant.",
+    "- The user prompt may mention variants, flavors, editions, sub-brands, colors, or sizes that are NOT in the catalog. You MUST silently IGNORE those mentions and use only the canonical catalog names. Treat the user as if they had said only the canonical name.",
+    "- If the user asks for multiple distinct variants of the same product and only one exists in the catalog, use the one catalog product for all of them.",
+    "- When describing a product in base_scene, use ONLY its canonical name. Do not add flavor/edition/variant modifiers unless those exact words appear in the product's `description` field in the context.",
+    "- The product's visual appearance (label text, colors, branding, graphics) comes from the reference image the image model will see — NOT from your storyboard text. Do NOT describe the product's label, colors, or branding in detail. Describe only the product's position, action, and scale in the scene. The image model will replicate the product's appearance from the reference image.",
     "",
     "Physical scale (CRITICAL — most common failure mode):",
     "- The image model has no innate sense of how big a product is. You MUST anchor scale explicitly inside `base_scene` (not just inside per-frame changes).",
@@ -132,9 +138,80 @@ function tryParse(raw: string, frameCount: number): FrameStoryboard {
 }
 
 /**
+ * Build a set of lowercased tokens that are "allowed" to appear after a
+ * catalog product name — everything that shows up anywhere in the catalog
+ * (names, descriptions, categories). Used by the catalog validator to decide
+ * whether `{ProductName} {CapitalizedWord}` is a legitimate catalog phrase
+ * or an invented variant.
+ */
+function buildAllowedVocab(products: GenContextProduct[]): Set<string> {
+  const set = new Set<string>();
+  const add = (s: string | null | undefined) => {
+    if (!s) return;
+    for (const w of s.split(/\s+/)) {
+      const clean = w.replace(/[^\p{L}\p{N}']/gu, "").toLowerCase();
+      if (clean) set.add(clean);
+    }
+  };
+  for (const p of products) {
+    add(p.name);
+    add(p.description);
+    add(p.category);
+  }
+  return set;
+}
+
+/**
+ * Scan storyboard text for catalog violations: a canonical product name
+ * followed by a capitalized word that is NOT in the catalog vocabulary. This
+ * catches Claude inventing variants like "Aranxhata Exotic" when the catalog
+ * only has "Aranxhata". Returns an empty array if everything is clean.
+ */
+export function validateStoryboardAgainstCatalog(
+  sb: FrameStoryboard,
+  products: GenContextProduct[]
+): string[] {
+  const violations: string[] = [];
+  if (products.length === 0) return violations;
+
+  const allowed = buildAllowedVocab(products);
+
+  const texts: { where: string; text: string }[] = [
+    { where: "base_scene", text: sb.base_scene },
+    ...sb.frames.map((f, i) => ({
+      where: `frames[${i}].change`,
+      text: f.change,
+    })),
+  ];
+  if (sb.video_prompt) {
+    texts.push({ where: "video_prompt", text: sb.video_prompt });
+  }
+
+  for (const p of products) {
+    const escaped = p.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Match: product name followed by whitespace + a capitalized word
+    // (uppercase letter + 1+ letters/apostrophe/hyphen).
+    const re = new RegExp(`\\b${escaped}\\s+([A-Z][A-Za-z'’\\-]+)`, "g");
+    for (const { where, text } of texts) {
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        const word = m[1]!;
+        if (!allowed.has(word.toLowerCase())) {
+          violations.push(
+            `${where}: "${p.name} ${word}" — "${word}" is not in the catalog for product "${p.name}". Use only the canonical name.`
+          );
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+/**
  * Generate a structured storyboard for a frame set. Retries once on parse
- * failure with a stricter reminder. Throws if the second attempt also fails —
- * the caller should surface a 500 and not create a frame set row.
+ * failure OR catalog-violation failure, with a stricter reminder that
+ * includes the specific failure reason. Throws if the second attempt also
+ * fails — the caller should surface a 500 and not create a frame set row.
  */
 export async function generateFrameStoryboard(
   userPrompt: string,
@@ -144,21 +221,44 @@ export async function generateFrameStoryboard(
 ): Promise<FrameStoryboard> {
   const systemPrompt = buildSystemPrompt(ctx, skillsContent, frameCount);
 
+  const attempt = async (uPrompt: string): Promise<FrameStoryboard> => {
+    const raw = await generateText(systemPrompt, uPrompt);
+    const parsed = tryParse(raw, frameCount);
+    const violations = validateStoryboardAgainstCatalog(parsed, ctx.products);
+    if (violations.length > 0) {
+      throw new Error(`catalog violations — ${violations.join(" | ")}`);
+    }
+    return parsed;
+  };
+
   // First attempt
   let firstError: string | null = null;
   try {
-    const raw = await generateText(systemPrompt, userPrompt);
-    return tryParse(raw, frameCount);
+    return await attempt(userPrompt);
   } catch (err) {
     firstError = err instanceof Error ? err.message : String(err);
     console.warn("[frame-storyboard] First attempt failed:", firstError);
   }
 
-  // Retry with stricter reminder
-  const retryUserPrompt = `${userPrompt}\n\nRETURN ONLY JSON. NO PROSE. NO CODE FENCES. NO MARKDOWN.`;
+  // Retry with stricter reminder. Include the canonical product list and
+  // the specific failure reason so Claude can self-correct.
+  const canonicalList =
+    ctx.products.length > 0
+      ? ctx.products.map((p) => `"${p.name}"`).join(", ")
+      : "(none — no products in catalog)";
+  const retryUserPrompt = [
+    userPrompt,
+    "",
+    "IMPORTANT — your previous attempt failed:",
+    firstError,
+    "",
+    `The ONLY product names you may use are: ${canonicalList}. Do not write any variant, flavor, edition, or sub-brand extensions after these names. Do not invent new products.`,
+    "Describe the product's position and action only — NOT its label, colors, or branding.",
+    "RETURN ONLY JSON. NO PROSE. NO CODE FENCES. NO MARKDOWN.",
+  ].join("\n");
+
   try {
-    const raw = await generateText(systemPrompt, retryUserPrompt);
-    return tryParse(raw, frameCount);
+    return await attempt(retryUserPrompt);
   } catch (err) {
     const secondError = err instanceof Error ? err.message : String(err);
     throw new Error(

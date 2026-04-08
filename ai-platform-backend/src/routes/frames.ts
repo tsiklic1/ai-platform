@@ -147,8 +147,10 @@ frames.post("/:brandId/frames/generate", async (c) => {
                 : `"${product.name}"`;
             }
             return ref;
-          } catch {
-            console.error(`[frames] Failed to fetch reference image: ${row.url}`);
+          } catch (err) {
+            console.error(
+              `[frames] !! PRODUCT REFERENCE IMAGE FETCH FAILED — product_id=${row.product_id}, url=${row.url}, error=${err instanceof Error ? err.message : String(err)}`
+            );
             return null;
           }
         })
@@ -156,6 +158,11 @@ frames.post("/:brandId/frames/generate", async (c) => {
       productImages = fetched.filter(
         (img): img is ReferenceImage => img !== null
       );
+      if (productImages.length < imageRows.length) {
+        console.warn(
+          `[frames] !! Product reference image count mismatch: ${imageRows.length} rows in DB, only ${productImages.length} successfully fetched. Generation will proceed with reduced references.`
+        );
+      }
     }
   }
 
@@ -184,8 +191,10 @@ frames.post("/:brandId/frames/generate", async (c) => {
               mimeType,
               label: `content type "${ctName}"`,
             };
-          } catch {
-            console.error(`[frames] Failed to fetch content type image: ${row.url}`);
+          } catch (err) {
+            console.error(
+              `[frames] !! CONTENT TYPE REFERENCE IMAGE FETCH FAILED — url=${row.url}, error=${err instanceof Error ? err.message : String(err)}`
+            );
             return null;
           }
         })
@@ -193,6 +202,11 @@ frames.post("/:brandId/frames/generate", async (c) => {
       contentTypeImages = fetched.filter(
         (img): img is ReferenceImage => img !== null
       );
+      if (contentTypeImages.length < ctImageRows.length) {
+        console.warn(
+          `[frames] !! Content type reference image count mismatch: ${ctImageRows.length} rows in DB, only ${contentTypeImages.length} successfully fetched.`
+        );
+      }
     }
   }
 
