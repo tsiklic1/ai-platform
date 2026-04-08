@@ -553,7 +553,13 @@ Non-priority items to discuss once core stages are complete.
 
 ---
 
-### BL-002: Reset default content types endpoint
+### BL-002: Reset default content types endpoint — ✅ DONE (2026-04-08)
+
+**Status**: Shipped. `POST /brands/:brandId/content-types/reset-defaults` wipes every content type for the brand (default + custom, cascading to `content_type_images` DB rows) and re-seeds the 5 starter templates from `getDefaultContentTypes()`. Storage files for CT reference images are cleaned up before the DB delete. Route registered before `/:id` handlers so "reset-defaults" is never matched as an `:id` param. Frontend Content Types page has a "Reset to defaults" button in the header gated by `window.confirm()`.
+
+---
+
+### BL-002 (original spec, kept for history): Reset default content types endpoint
 
 **Description**: Endpoint `POST /brands/:brandId/content-types/reset-defaults` that re-seeds the 5 default content type templates for a brand. Useful if a user deletes or heavily modifies defaults and wants to start fresh.
 
