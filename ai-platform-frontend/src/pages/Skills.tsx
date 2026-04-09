@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { api } from '../lib/api'
+import { SkillBuilderModal, type GeneratedSkill } from '../components/SkillBuilderModal'
 
 // Types matching backend schema
 interface SkillSummary {
@@ -45,12 +46,13 @@ interface SidebarProps {
   isNew: boolean
   open: boolean
   saving: boolean
+  initialData?: { name: string; description: string; content: string; actions: string[] } | null
   onClose: () => void
   onSave: (data: { name: string; description: string; content: string; actions: string[] }) => void
   onDelete: () => void
 }
 
-function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }: SidebarProps) {
+function SkillSidebar({ skill, isNew, open, saving, initialData, onClose, onSave, onDelete }: SidebarProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [content, setContent] = useState('')
@@ -59,7 +61,12 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
   const readOnly = !isNew && !!skill?.is_default
 
   useEffect(() => {
-    if (isNew) {
+    if (isNew && initialData) {
+      setName(initialData.name)
+      setDescription(initialData.description)
+      setContent(initialData.content)
+      setActions(initialData.actions)
+    } else if (isNew) {
       setName('')
       setDescription('')
       setContent('')
@@ -70,7 +77,7 @@ function SkillSidebar({ skill, isNew, open, saving, onClose, onSave, onDelete }:
       setContent(skill.content || '')
       setActions(skill.actions || [])
     }
-  }, [skill, isNew])
+  }, [skill, isNew, initialData])
 
   const toggleAction = (actionId: string) => {
     setActions((prev) =>
@@ -229,6 +236,10 @@ export default function Skills() {
   const [isNew, setIsNew] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Skill builder state
+  const [showBuilder, setShowBuilder] = useState(false)
+  const [generatedSkill, setGeneratedSkill] = useState<GeneratedSkill | null>(null)
+
   // Fetch skills list
   const fetchSkills = useCallback(async () => {
     if (!token) return
@@ -249,6 +260,16 @@ export default function Skills() {
 
   // Open sidebar for new skill
   const handleNew = () => {
+    setGeneratedSkill(null)
+    setSelectedSkill(null)
+    setIsNew(true)
+    setSidebarOpen(true)
+  }
+
+  // Handle builder completion — open sidebar pre-populated
+  const handleBuilderComplete = (data: GeneratedSkill) => {
+    setShowBuilder(false)
+    setGeneratedSkill(data)
     setSelectedSkill(null)
     setIsNew(true)
     setSidebarOpen(true)
@@ -381,6 +402,15 @@ export default function Skills() {
             </button>
           ))}
 
+          {/* Generate with AI card */}
+          <button
+            onClick={() => setShowBuilder(true)}
+            className="p-5 rounded-xl border-2 border-dashed border-purple-300 hover:border-purple-400 hover:bg-purple-50/50 transition-all flex flex-col items-center justify-center min-h-[120px] group"
+          >
+            <span className="text-2xl text-purple-300 group-hover:text-purple-500 transition-colors">&#9733;</span>
+            <span className="mt-1 text-sm text-purple-400 group-hover:text-purple-600 font-medium transition-colors">Generate with AI</span>
+          </button>
+
           {/* New skill card */}
           <button
             onClick={handleNew}
@@ -398,9 +428,17 @@ export default function Skills() {
         isNew={isNew}
         open={sidebarOpen}
         saving={saving}
+        initialData={generatedSkill}
         onClose={handleClose}
         onSave={handleSave}
         onDelete={handleDelete}
+      />
+
+      {/* Skill Builder Modal */}
+      <SkillBuilderModal
+        open={showBuilder}
+        onClose={() => setShowBuilder(false)}
+        onComplete={handleBuilderComplete}
       />
     </div>
   )

@@ -9,6 +9,7 @@ import contentTypes from "./routes/content-types";
 import images from "./routes/images";
 import texts from "./routes/texts";
 import frames from "./routes/frames";
+import skillBuilder from "./routes/skill-builder";
 
 const app = new Hono();
 
@@ -30,6 +31,7 @@ app.route("/brands", contentTypes);
 app.route("/brands", images);
 app.route("/brands", texts);
 app.route("/brands", frames);
+app.route("/skill-builder", skillBuilder);
 
 export default {
   port: Number(process.env.PORT) || 3000,

@@ -4,7 +4,8 @@
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = process.env.GEMINI_MODEL || "google/gemini-3.1-flash-image-preview";
+const MODEL =
+  process.env.GEMINI_MODEL || "google/gemini-3.1-flash-image-preview";
 
 export interface ReferenceImage {
   base64: string; // base64 data (no prefix)
@@ -33,7 +34,7 @@ interface ContentTypeForPrompt {
  */
 export function assemblePrompt(
   userPrompt: string,
-  contentType?: ContentTypeForPrompt | null
+  contentType?: ContentTypeForPrompt | null,
 ): string {
   const parts: string[] = [];
 
@@ -58,7 +59,7 @@ export async function generateImage(
   aspectRatio: "1:1" | "9:16" = "1:1",
   skillsContent?: string | null,
   previousFrame?: ReferenceImage | null,
-  contextBlock?: string | null
+  contextBlock?: string | null,
 ): Promise<GeneratedImage> {
   if (!OPENROUTER_API_KEY) {
     throw new Error("OPENROUTER_API_KEY is not configured");
@@ -119,7 +120,9 @@ export async function generateImage(
     });
     content.push({
       type: "image_url",
-      image_url: { url: `data:${previousFrame.mimeType};base64,${previousFrame.base64}` },
+      image_url: {
+        url: `data:${previousFrame.mimeType};base64,${previousFrame.base64}`,
+      },
     });
   }
 
@@ -160,7 +163,9 @@ export async function generateImage(
     if (!response.ok) {
       const errBody = await response.text();
       console.error("[gemini] OpenRouter error:", response.status, errBody);
-      throw new Error(`OpenRouter returned ${response.status}: ${errBody.slice(0, 200)}`);
+      throw new Error(
+        `OpenRouter returned ${response.status}: ${errBody.slice(0, 200)}`,
+      );
     }
 
     const data = await response.json();
@@ -173,7 +178,7 @@ export async function generateImage(
       // Check if there's a text response (safety filter, refusal)
       const textContent = data.choices?.[0]?.message?.content;
       throw new Error(
-        `Gemini did not return an image. ${textContent ? `Response: ${String(textContent).slice(0, 200)}` : "The prompt may have been blocked by safety filters."}`
+        `Gemini did not return an image. ${textContent ? `Response: ${String(textContent).slice(0, 200)}` : "The prompt may have been blocked by safety filters."}`,
       );
     }
 
@@ -198,17 +203,14 @@ export async function generateImage(
       mimeType,
     };
   } catch (err) {
-    if (
-      err instanceof Error &&
-      err.message.includes("OPENROUTER_API_KEY")
-    ) {
+    if (err instanceof Error && err.message.includes("OPENROUTER_API_KEY")) {
       throw err;
     }
     console.error("[gemini] Generation failed:", err);
     throw new Error(
       err instanceof Error
         ? `Image generation failed: ${err.message}`
-        : "Image generation failed unexpectedly"
+        : "Image generation failed unexpectedly",
     );
   }
 }
