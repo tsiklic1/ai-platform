@@ -33,7 +33,6 @@ frames.post("/:brandId/frames/generate", async (c) => {
   let body: {
     prompt?: string;
     reference_image?: { source: string; id: string };
-    reference_frame_position?: number;
     content_type_id?: string;
     aspect_ratio?: string;
     skill_ids?: string[];
@@ -66,20 +65,6 @@ frames.post("/:brandId/frames/generate", async (c) => {
   ) {
     return c.json(
       { error: "reference_image with source ('generated_image' | 'product_image') and id is required" },
-      400
-    );
-  }
-
-  const refPosition = body.reference_frame_position;
-  if (
-    refPosition === undefined ||
-    typeof refPosition !== "number" ||
-    !Number.isInteger(refPosition) ||
-    refPosition < 1 ||
-    refPosition > FRAME_COUNT
-  ) {
-    return c.json(
-      { error: `reference_frame_position must be an integer between 1 and ${FRAME_COUNT}` },
       400
     );
   }
@@ -176,7 +161,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
   const referenceRef: ReferenceImage = {
     base64: referenceBase64,
     mimeType: referenceMimeType,
-    label: `REFERENCE IMAGE — frame ${refPosition}/${FRAME_COUNT}. Match its visual style and product appearance exactly.`,
+    label: "REFERENCE IMAGE — match its visual style and product appearance exactly in every frame.",
   };
 
   // ── Fetch products (for generation context + skills only) ───
@@ -245,7 +230,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
   const fullPrompt = [
     contextBlock,
     skillsContent ? `[Skills]\n${skillsContent}` : null,
-    `[Reference] Image is frame ${refPosition}/${FRAME_COUNT}`,
+    "[Reference] 1 reference image attached",
     `[Prompt]\n${basePrompt}`,
   ]
     .filter(Boolean)
@@ -262,7 +247,6 @@ frames.post("/:brandId/frames/generate", async (c) => {
       full_prompt: fullPrompt,
       storyboard: null,
       reference_image_url: referenceImageUrl,
-      reference_frame_position: refPosition,
       aspect_ratio: aspectRatio,
       status: "generating",
       frame_count: FRAME_COUNT,
@@ -290,86 +274,8 @@ frames.post("/:brandId/frames/generate", async (c) => {
   let previousFrameMimeType: string | null = null;
 
   for (let n = 1; n <= FRAME_COUNT; n++) {
-    // ── CASE A: this frame IS the reference image ──
-    if (n === refPosition) {
-      const ext = MIME_TO_EXT[referenceMimeType] || "png";
-      const storagePath = `${user.id}/frames/${frameSetId}/${n}.${ext}`;
-      const imageBuffer = Buffer.from(referenceBase64, "base64");
-
-      const { error: uploadError } = await sb.storage
-        .from("brand-assets")
-        .upload(storagePath, imageBuffer, {
-          contentType: referenceMimeType,
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error(`[frames] Reference frame ${n} upload failed:`, uploadError.message);
-        await sb
-          .from("generated_frame_sets")
-          .update({ status: "failed" })
-          .eq("id", frameSetId);
-
-        return c.json(
-          {
-            frameSet: { ...frameSet, status: "failed" },
-            frames: generatedFrames,
-            error: `Reference frame ${n} storage upload failed`,
-          },
-          500
-        );
-      }
-
-      const {
-        data: { publicUrl },
-      } = sb.storage.from("brand-assets").getPublicUrl(storagePath);
-
-      const { data: frameRecord, error: insertError } = await sb
-        .from("generated_frames")
-        .insert({
-          user_id: user.id,
-          frame_set_id: frameSetId,
-          frame_number: n,
-          storage_path: storagePath,
-          url: publicUrl,
-        })
-        .select()
-        .single();
-
-      if (insertError || !frameRecord) {
-        console.error(`[frames] Reference frame ${n} DB insert failed:`, insertError?.message);
-        await sb
-          .from("generated_frame_sets")
-          .update({ status: "failed" })
-          .eq("id", frameSetId);
-
-        return c.json(
-          {
-            frameSet: { ...frameSet, status: "failed" },
-            frames: generatedFrames,
-            error: `Reference frame ${n} database insert failed`,
-          },
-          500
-        );
-      }
-
-      generatedFrames.push(frameRecord);
-      previousFrameBase64 = referenceBase64;
-      previousFrameMimeType = referenceMimeType;
-
-      console.log(`[frames] Frame ${n}/${FRAME_COUNT} (reference) for set ${frameSetId}`);
-      continue;
-    }
-
-    // ── CASE B: generate this frame ──
-    const direction =
-      n < refPosition
-        ? `This frame leads up to the reference image (frame ${refPosition}/${FRAME_COUNT}). Build toward that composition.`
-        : `This frame continues from the reference image (frame ${refPosition}/${FRAME_COUNT}). Extend naturally from that composition.`;
-
     const framePrompt = [
       `Frame ${n}/${FRAME_COUNT} of a video sequence.`,
-      direction,
       "",
       basePrompt,
       "",
@@ -519,7 +425,7 @@ frames.get("/:brandId/frames", async (c) => {
   // Get frame sets
   const { data: frameSets, error } = await sb
     .from("generated_frame_sets")
-    .select("id, prompt, aspect_ratio, content_type_id, status, frame_count, reference_frame_position, created_at")
+    .select("id, prompt, aspect_ratio, content_type_id, status, frame_count, created_at")
     .eq("brand_id", brandId)
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);

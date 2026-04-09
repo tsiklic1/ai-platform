@@ -26,7 +26,6 @@ interface FrameSetSummary {
   content_type_id: string | null;
   status: string;
   frame_count: number;
-  reference_frame_position: number | null;
   created_at: string;
   frames: Frame[];
 }
@@ -41,7 +40,6 @@ interface FrameSetFull {
   aspect_ratio: string;
   status: string;
   frame_count: number;
-  reference_frame_position: number | null;
   created_at: string;
 }
 
@@ -134,9 +132,6 @@ function FrameDetailSidebar({
                   >
                     <div className="text-[10px] text-gray-500 px-2 py-1 bg-gray-50 font-medium">
                       Frame {f.frame_number}/{frameSet.frame_count}
-                      {frameSet.reference_frame_position === f.frame_number && (
-                        <span className="ml-1.5 text-indigo-600 font-semibold">REF</span>
-                      )}
                     </div>
                     <img src={f.url} alt="" className="w-full h-auto" />
                   </div>
@@ -240,7 +235,6 @@ export default function Frames() {
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "9:16">("9:16");
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [referenceImage, setReferenceImage] = useState<SelectedReferenceImage | null>(null);
-  const [referenceFramePosition, setReferenceFramePosition] = useState<number>(1);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -303,7 +297,6 @@ export default function Frames() {
     setAspectRatio("9:16");
     setSelectedSkillIds([]);
     setReferenceImage(null);
-    setReferenceFramePosition(1);
     fetchFrameSets(1);
   }, [fetchFrameSets]);
 
@@ -321,7 +314,6 @@ export default function Frames() {
             source: referenceImage.source,
             id: referenceImage.id,
           },
-          reference_frame_position: referenceFramePosition,
           content_type_id: contentTypeId,
           aspect_ratio: aspectRatio,
           skill_ids:
@@ -494,25 +486,6 @@ export default function Frames() {
                   className="w-full h-full object-cover"
                 />
               </div>
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] text-gray-400">
-                  Frame position
-                </span>
-                <select
-                  value={referenceFramePosition}
-                  onChange={(e) =>
-                    setReferenceFramePosition(parseInt(e.target.value))
-                  }
-                  disabled={generating}
-                  className="rounded-lg border border-gray-300 px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      Frame {n}/5
-                    </option>
-                  ))}
-                </select>
-              </div>
               <button
                 onClick={() => setPickerOpen(true)}
                 disabled={generating}
@@ -558,7 +531,7 @@ export default function Frames() {
         {/* Generate button */}
         <div className="flex items-center justify-between">
           <p className="text-[10px] text-gray-400">
-            Generates 4 frames around your reference image (~8 min).{" "}
+            Generates 5 frames using your reference image (~10 min).{" "}
             <span className="text-gray-300">Cmd+Enter to generate</span>
           </p>
           <button
@@ -634,18 +607,13 @@ export default function Frames() {
                   {fs.frames.map((f) => (
                     <div
                       key={f.id}
-                      className="flex-1 aspect-[9/16] rounded-lg overflow-hidden bg-gray-100 relative"
+                      className="flex-1 aspect-[9/16] rounded-lg overflow-hidden bg-gray-100"
                     >
                       <img
                         src={f.url}
                         alt={`Frame ${f.frame_number}`}
                         className="w-full h-full object-cover"
                       />
-                      {fs.reference_frame_position === f.frame_number && (
-                        <span className="absolute top-1 left-1 text-[8px] font-bold bg-indigo-600 text-white px-1 py-0.5 rounded">
-                          REF
-                        </span>
-                      )}
                     </div>
                   ))}
                   {/* Placeholder slots for incomplete sets */}
