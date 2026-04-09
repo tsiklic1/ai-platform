@@ -6,6 +6,10 @@ import { NoBrandPrompt } from "../components/NoBrandPrompt";
 import { AspectRatioToggle } from "../components/AspectRatioToggle";
 import { ContentTypeSelector } from "../components/ContentTypeSelector";
 import { SkillPicker } from "../components/SkillPicker";
+import {
+  ReferenceImagePicker,
+  type SelectedReferenceImage,
+} from "../components/ReferenceImagePicker";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -22,6 +26,7 @@ interface FrameSetSummary {
   content_type_id: string | null;
   status: string;
   frame_count: number;
+  reference_frame_position: number | null;
   created_at: string;
   frames: Frame[];
 }
@@ -36,6 +41,7 @@ interface FrameSetFull {
   aspect_ratio: string;
   status: string;
   frame_count: number;
+  reference_frame_position: number | null;
   created_at: string;
 }
 
@@ -128,6 +134,9 @@ function FrameDetailSidebar({
                   >
                     <div className="text-[10px] text-gray-500 px-2 py-1 bg-gray-50 font-medium">
                       Frame {f.frame_number}/{frameSet.frame_count}
+                      {frameSet.reference_frame_position === f.frame_number && (
+                        <span className="ml-1.5 text-indigo-600 font-semibold">REF</span>
+                      )}
                     </div>
                     <img src={f.url} alt="" className="w-full h-auto" />
                   </div>
@@ -230,6 +239,9 @@ export default function Frames() {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "9:16">("9:16");
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [referenceImage, setReferenceImage] = useState<SelectedReferenceImage | null>(null);
+  const [referenceFramePosition, setReferenceFramePosition] = useState<number>(1);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -290,12 +302,14 @@ export default function Frames() {
     setPrompt("");
     setAspectRatio("9:16");
     setSelectedSkillIds([]);
+    setReferenceImage(null);
+    setReferenceFramePosition(1);
     fetchFrameSets(1);
   }, [fetchFrameSets]);
 
   // Generate handler
   const handleGenerate = async () => {
-    if (!prompt.trim() || !token || !brandId) return;
+    if (!prompt.trim() || !referenceImage || !token || !brandId) return;
     setGenerating(true);
     setGenError(null);
     try {
@@ -303,6 +317,11 @@ export default function Frames() {
         method: "POST",
         body: {
           prompt: prompt.trim(),
+          reference_image: {
+            source: referenceImage.source,
+            id: referenceImage.id,
+          },
+          reference_frame_position: referenceFramePosition,
           content_type_id: contentTypeId,
           aspect_ratio: aspectRatio,
           skill_ids:
@@ -461,6 +480,65 @@ export default function Frames() {
           />
         </div>
 
+        {/* Reference Image */}
+        <div className="mb-3">
+          <label className="block text-xs font-medium text-gray-500 mb-1">
+            Reference Image <span className="text-red-400">*</span>
+          </label>
+          {referenceImage ? (
+            <div className="flex items-center gap-3">
+              <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                <img
+                  src={referenceImage.url}
+                  alt=""
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-gray-400">
+                  Frame position
+                </span>
+                <select
+                  value={referenceFramePosition}
+                  onChange={(e) =>
+                    setReferenceFramePosition(parseInt(e.target.value))
+                  }
+                  disabled={generating}
+                  className="rounded-lg border border-gray-300 px-2 py-1 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                >
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      Frame {n}/5
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => setPickerOpen(true)}
+                disabled={generating}
+                className="text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
+              >
+                Change
+              </button>
+              <button
+                onClick={() => setReferenceImage(null)}
+                disabled={generating}
+                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setPickerOpen(true)}
+              disabled={generating}
+              className="px-4 py-2 text-sm border border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-indigo-400 hover:text-indigo-600 disabled:opacity-50 transition-colors"
+            >
+              Choose reference image...
+            </button>
+          )}
+        </div>
+
         {/* Prompt */}
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-500 mb-1">
@@ -480,13 +558,12 @@ export default function Frames() {
         {/* Generate button */}
         <div className="flex items-center justify-between">
           <p className="text-[10px] text-gray-400">
-            Generates 5 frames sequentially (up to 10 min). Each frame references
-            the previous for visual continuity.{" "}
+            Generates 4 frames around your reference image (~8 min).{" "}
             <span className="text-gray-300">Cmd+Enter to generate</span>
           </p>
           <button
             onClick={handleGenerate}
-            disabled={generating || !prompt.trim()}
+            disabled={generating || !prompt.trim() || !referenceImage}
             className="px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {generating ? (
@@ -557,13 +634,18 @@ export default function Frames() {
                   {fs.frames.map((f) => (
                     <div
                       key={f.id}
-                      className="flex-1 aspect-[9/16] rounded-lg overflow-hidden bg-gray-100"
+                      className="flex-1 aspect-[9/16] rounded-lg overflow-hidden bg-gray-100 relative"
                     >
                       <img
                         src={f.url}
                         alt={`Frame ${f.frame_number}`}
                         className="w-full h-full object-cover"
                       />
+                      {fs.reference_frame_position === f.frame_number && (
+                        <span className="absolute top-1 left-1 text-[8px] font-bold bg-indigo-600 text-white px-1 py-0.5 rounded">
+                          REF
+                        </span>
+                      )}
                     </div>
                   ))}
                   {/* Placeholder slots for incomplete sets */}
@@ -631,6 +713,18 @@ export default function Frames() {
         loading={sidebarLoading}
         onClose={handleCloseSidebar}
         onDelete={handleDelete}
+      />
+
+      {/* Reference Image Picker Modal */}
+      <ReferenceImagePicker
+        brandId={brandId}
+        token={token}
+        open={pickerOpen}
+        onSelect={(img) => {
+          setReferenceImage(img);
+          setPickerOpen(false);
+        }}
+        onClose={() => setPickerOpen(false)}
       />
     </div>
   );
