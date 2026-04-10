@@ -10,6 +10,7 @@ import {
   ReferenceImagePicker,
   type SelectedReferenceImage,
 } from "../components/ReferenceImagePicker";
+import { FramePromptBuilderModal } from "../components/FramePromptBuilderModal";
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -236,6 +237,7 @@ export default function Frames() {
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   const [referenceImages, setReferenceImages] = useState<SelectedReferenceImage[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -522,9 +524,18 @@ export default function Frames() {
 
         {/* Prompt */}
         <div className="mb-3">
-          <label className="block text-xs font-medium text-gray-500 mb-1">
-            Prompt <span className="text-red-400">*</span>
-          </label>
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs font-medium text-gray-500">
+              Prompt <span className="text-red-400">*</span>
+            </label>
+            <button
+              onClick={() => setBuilderOpen(true)}
+              disabled={generating}
+              className="text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50 font-medium"
+            >
+              AI Prompt Builder
+            </button>
+          </div>
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -692,6 +703,18 @@ export default function Frames() {
       />
 
       {/* Reference Image Picker Modal */}
+      {/* Frame Prompt Builder Modal */}
+      <FramePromptBuilderModal
+        open={builderOpen}
+        brandId={brandId}
+        skillIds={selectedSkillIds}
+        onClose={() => setBuilderOpen(false)}
+        onUse={(text) => {
+          setPrompt(text);
+          setBuilderOpen(false);
+        }}
+      />
+
       <ReferenceImagePicker
         brandId={brandId}
         token={token}
