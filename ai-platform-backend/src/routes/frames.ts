@@ -32,7 +32,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
 
   let body: {
     prompt?: string;
-    reference_image?: { source: string; id: string };
+    reference_images?: { source: string; id: string }[];
     content_type_id?: string;
     aspect_ratio?: string;
     skill_ids?: string[];
@@ -55,16 +55,21 @@ frames.post("/:brandId/frames/generate", async (c) => {
     return c.json({ error: "aspect_ratio must be '1:1' or '9:16'" }, 400);
   }
 
-  const refImage = body.reference_image;
+  const refImages = body.reference_images;
   if (
-    !refImage ||
-    typeof refImage !== "object" ||
-    !["generated_image", "product_image"].includes(refImage.source) ||
-    !refImage.id ||
-    typeof refImage.id !== "string"
+    !Array.isArray(refImages) ||
+    refImages.length === 0 ||
+    refImages.length > 3 ||
+    !refImages.every(
+      (r) =>
+        r &&
+        typeof r === "object" &&
+        ["generated_image", "product_image"].includes(r.source) &&
+        typeof r.id === "string"
+    )
   ) {
     return c.json(
-      { error: "reference_image with source ('generated_image' | 'product_image') and id is required" },
+      { error: "reference_images must be an array of 1-3 items with source ('generated_image' | 'product_image') and id" },
       400
     );
   }
@@ -116,53 +121,61 @@ frames.post("/:brandId/frames/generate", async (c) => {
   // Default to 9:16 for video frames
   if (!aspectRatio) aspectRatio = "9:16";
 
-  // ── Resolve reference image ─────────────────────────────────
+  // ── Resolve reference images ────────────────────────────────
 
-  let referenceImageUrl: string | null = null;
+  const referenceRefs: ReferenceImage[] = [];
+  const referenceImageUrls: string[] = [];
 
-  if (refImage.source === "product_image") {
-    const { data, error } = await sb
-      .from("brand_product_images")
-      .select("url")
-      .eq("id", refImage.id)
-      .single();
-    if (error || !data) {
-      return c.json({ error: "Reference product image not found" }, 404);
+  for (let i = 0; i < refImages.length; i++) {
+    const refImage = refImages[i];
+    let url: string;
+
+    if (refImage.source === "product_image") {
+      const { data, error } = await sb
+        .from("brand_product_images")
+        .select("url")
+        .eq("id", refImage.id)
+        .single();
+      if (error || !data) {
+        return c.json({ error: `Reference product image ${i + 1} not found` }, 404);
+      }
+      url = data.url;
+    } else {
+      const { data, error } = await sb
+        .from("generated_images")
+        .select("url")
+        .eq("id", refImage.id)
+        .single();
+      if (error || !data) {
+        return c.json({ error: `Reference generated image ${i + 1} not found` }, 404);
+      }
+      url = data.url;
     }
-    referenceImageUrl = data.url;
-  } else {
-    const { data, error } = await sb
-      .from("generated_images")
-      .select("url")
-      .eq("id", refImage.id)
-      .single();
-    if (error || !data) {
-      return c.json({ error: "Reference generated image not found" }, 404);
+
+    referenceImageUrls.push(url);
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const buffer = await res.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
+      const mimeType = res.headers.get("content-type") || "image/jpeg";
+
+      referenceRefs.push({
+        base64,
+        mimeType,
+        label:
+          i === 0
+            ? "PRIMARY REFERENCE — match this product's visual appearance, colors, labels, and branding exactly in every frame."
+            : `ADDITIONAL REFERENCE ${i + 1} — use for extra visual context on the product's appearance.`,
+      });
+    } catch (err) {
+      console.error(
+        `[frames] Failed to fetch reference image ${i + 1}: url=${url}, error=${err instanceof Error ? err.message : String(err)}`
+      );
+      return c.json({ error: `Failed to fetch reference image ${i + 1}` }, 500);
     }
-    referenceImageUrl = data.url;
   }
-
-  // Fetch reference image to base64
-  let referenceBase64: string;
-  let referenceMimeType: string;
-  try {
-    const res = await fetch(referenceImageUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buffer = await res.arrayBuffer();
-    referenceBase64 = Buffer.from(buffer).toString("base64");
-    referenceMimeType = res.headers.get("content-type") || "image/jpeg";
-  } catch (err) {
-    console.error(
-      `[frames] Failed to fetch reference image: url=${referenceImageUrl}, error=${err instanceof Error ? err.message : String(err)}`
-    );
-    return c.json({ error: "Failed to fetch reference image" }, 500);
-  }
-
-  const referenceRef: ReferenceImage = {
-    base64: referenceBase64,
-    mimeType: referenceMimeType,
-    label: "REFERENCE IMAGE — match its visual style and product appearance exactly in every frame.",
-  };
 
   // ── Fetch products (for generation context + skills only) ───
 
@@ -200,7 +213,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
           default_aspect_ratio: contentType.default_aspect_ratio,
         }
       : null,
-    productImageCount: 1,
+    productImageCount: referenceRefs.length,
     styleImageCount: 0,
     aspectRatio,
   });
@@ -230,7 +243,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
   const fullPrompt = [
     contextBlock,
     skillsContent ? `[Skills]\n${skillsContent}` : null,
-    "[Reference] 1 reference image attached",
+    `[Reference] ${referenceRefs.length} reference image${referenceRefs.length > 1 ? "s" : ""} attached`,
     `[Prompt]\n${basePrompt}`,
   ]
     .filter(Boolean)
@@ -246,7 +259,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
       prompt: prompt.trim(),
       full_prompt: fullPrompt,
       storyboard: null,
-      reference_image_url: referenceImageUrl,
+      reference_image_url: referenceImageUrls[0],
       aspect_ratio: aspectRatio,
       status: "generating",
       frame_count: FRAME_COUNT,
@@ -279,8 +292,11 @@ frames.post("/:brandId/frames/generate", async (c) => {
       "",
       basePrompt,
       "",
+      "[PRODUCT ACCURACY]",
+      "The PRODUCT REFERENCE images are the ground truth for the product's appearance. Match colors, labels, typography, and branding exactly. Do NOT alter, reinterpret, or stylize the product design.",
+      "",
       "[CONSISTENCY ENFORCEMENT]",
-      "Maintain the same style, lighting, colors, camera angle, and scene elements as the reference image. Only introduce the changes implied by the frame progression.",
+      "Maintain the same style, lighting, camera angle, and scene elements across frames. Only introduce changes implied by the frame progression.",
     ].join("\n");
 
     const prevFrame =
@@ -292,7 +308,7 @@ frames.post("/:brandId/frames/generate", async (c) => {
     try {
       generated = await generateImage(
         framePrompt,
-        [referenceRef],
+        referenceRefs,
         [],
         aspectRatio as "1:1" | "9:16",
         skillsContent,

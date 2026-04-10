@@ -26,7 +26,9 @@ interface ReferenceImagePickerProps {
   brandId: string;
   token: string;
   open: boolean;
-  onSelect: (image: SelectedReferenceImage) => void;
+  maxSelect?: number;
+  already?: SelectedReferenceImage[];
+  onSelect: (images: SelectedReferenceImage[]) => void;
   onClose: () => void;
 }
 
@@ -36,6 +38,8 @@ export function ReferenceImagePicker({
   brandId,
   token,
   open,
+  maxSelect = 1,
+  already = [],
   onSelect,
   onClose,
 }: ReferenceImagePickerProps) {
@@ -44,12 +48,12 @@ export function ReferenceImagePicker({
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingGenerated, setLoadingGenerated] = useState(false);
-  const [selected, setSelected] = useState<SelectedReferenceImage | null>(null);
+  const [selected, setSelected] = useState<SelectedReferenceImage[]>([]);
 
   // Fetch product images when modal opens
   useEffect(() => {
     if (!open || !brandId || !token) return;
-    setSelected(null);
+    setSelected(already);
 
     setLoadingProducts(true);
     api<{
@@ -91,8 +95,20 @@ export function ReferenceImagePicker({
 
   if (!open) return null;
 
+  const toggleImage = (img: SelectedReferenceImage) => {
+    setSelected((prev) => {
+      const exists = prev.findIndex((s) => s.id === img.id);
+      if (exists >= 0) return prev.filter((s) => s.id !== img.id);
+      if (prev.length >= maxSelect) {
+        // Replace the last one if at limit
+        return [...prev.slice(0, maxSelect - 1), img];
+      }
+      return [...prev, img];
+    });
+  };
+
   const handleConfirm = () => {
-    if (selected) {
+    if (selected.length > 0) {
       onSelect(selected);
     }
   };
@@ -120,7 +136,12 @@ export function ReferenceImagePicker({
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
             <h2 className="text-lg font-semibold text-gray-900">
-              Choose Reference Image
+              Choose Reference {maxSelect > 1 ? "Images" : "Image"}
+              {maxSelect > 1 && (
+                <span className="text-sm font-normal text-gray-400 ml-2">
+                  {selected.length}/{maxSelect}
+                </span>
+              )}
             </h2>
             <button
               onClick={onClose}
@@ -186,29 +207,37 @@ export function ReferenceImagePicker({
                         {name}
                       </p>
                       <div className="grid grid-cols-4 gap-3">
-                        {imgs.map((img) => (
-                          <button
-                            key={img.id}
-                            onClick={() =>
-                              setSelected({
-                                source: "product_image",
-                                id: img.id,
-                                url: img.url,
-                              })
-                            }
-                            className={`aspect-square rounded-lg overflow-hidden bg-gray-100 ring-2 transition-all ${
-                              selected?.id === img.id
-                                ? "ring-indigo-500 ring-offset-2"
-                                : "ring-transparent hover:ring-gray-300"
-                            }`}
-                          >
-                            <img
-                              src={img.url}
-                              alt={name}
-                              className="w-full h-full object-cover"
-                            />
-                          </button>
-                        ))}
+                        {imgs.map((img) => {
+                          const selIdx = selected.findIndex((s) => s.id === img.id);
+                          return (
+                            <button
+                              key={img.id}
+                              onClick={() =>
+                                toggleImage({
+                                  source: "product_image",
+                                  id: img.id,
+                                  url: img.url,
+                                })
+                              }
+                              className={`relative aspect-square rounded-lg overflow-hidden bg-gray-100 ring-2 transition-all ${
+                                selIdx >= 0
+                                  ? "ring-indigo-500 ring-offset-2"
+                                  : "ring-transparent hover:ring-gray-300"
+                              }`}
+                            >
+                              <img
+                                src={img.url}
+                                alt={name}
+                                className="w-full h-full object-cover"
+                              />
+                              {selIdx >= 0 && maxSelect > 1 && (
+                                <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">
+                                  {selIdx + 1}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   ));
@@ -216,34 +245,42 @@ export function ReferenceImagePicker({
               </div>
             ) : (
               <div className="grid grid-cols-4 gap-3">
-                {generatedImages.map((img) => (
-                  <button
-                    key={img.id}
-                    onClick={() =>
-                      setSelected({
-                        source: "generated_image",
-                        id: img.id,
-                        url: img.url,
-                      })
-                    }
-                    className={`group relative aspect-square rounded-lg overflow-hidden bg-gray-100 ring-2 transition-all ${
-                      selected?.id === img.id
-                        ? "ring-indigo-500 ring-offset-2"
-                        : "ring-transparent hover:ring-gray-300"
-                    }`}
-                  >
-                    <img
-                      src={img.url}
-                      alt=""
-                      className="w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <p className="text-[10px] text-white truncate">
-                        {img.prompt}
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                {generatedImages.map((img) => {
+                  const selIdx = selected.findIndex((s) => s.id === img.id);
+                  return (
+                    <button
+                      key={img.id}
+                      onClick={() =>
+                        toggleImage({
+                          source: "generated_image",
+                          id: img.id,
+                          url: img.url,
+                        })
+                      }
+                      className={`group relative aspect-square rounded-lg overflow-hidden bg-gray-100 ring-2 transition-all ${
+                        selIdx >= 0
+                          ? "ring-indigo-500 ring-offset-2"
+                          : "ring-transparent hover:ring-gray-300"
+                      }`}
+                    >
+                      <img
+                        src={img.url}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                      {selIdx >= 0 && maxSelect > 1 && (
+                        <span className="absolute top-1 right-1 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">
+                          {selIdx + 1}
+                        </span>
+                      )}
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <p className="text-[10px] text-white truncate">
+                          {img.prompt}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -258,10 +295,12 @@ export function ReferenceImagePicker({
             </button>
             <button
               onClick={handleConfirm}
-              disabled={!selected}
+              disabled={selected.length === 0}
               className="px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Select
+              {maxSelect > 1 && selected.length > 0
+                ? `Select ${selected.length} image${selected.length > 1 ? "s" : ""}`
+                : "Select"}
             </button>
           </div>
         </div>

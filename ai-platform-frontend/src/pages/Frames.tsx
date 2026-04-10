@@ -234,7 +234,7 @@ export default function Frames() {
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "9:16">("9:16");
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
-  const [referenceImage, setReferenceImage] = useState<SelectedReferenceImage | null>(null);
+  const [referenceImages, setReferenceImages] = useState<SelectedReferenceImage[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -296,13 +296,13 @@ export default function Frames() {
     setPrompt("");
     setAspectRatio("9:16");
     setSelectedSkillIds([]);
-    setReferenceImage(null);
+    setReferenceImages([]);
     fetchFrameSets(1);
   }, [fetchFrameSets]);
 
   // Generate handler
   const handleGenerate = async () => {
-    if (!prompt.trim() || !referenceImage || !token || !brandId) return;
+    if (!prompt.trim() || referenceImages.length === 0 || !token || !brandId) return;
     setGenerating(true);
     setGenError(null);
     try {
@@ -310,10 +310,10 @@ export default function Frames() {
         method: "POST",
         body: {
           prompt: prompt.trim(),
-          reference_image: {
-            source: referenceImage.source,
-            id: referenceImage.id,
-          },
+          reference_images: referenceImages.map((img) => ({
+            source: img.source,
+            id: img.id,
+          })),
           content_type_id: contentTypeId,
           aspect_ratio: aspectRatio,
           skill_ids:
@@ -472,33 +472,41 @@ export default function Frames() {
           />
         </div>
 
-        {/* Reference Image */}
+        {/* Reference Images */}
         <div className="mb-3">
           <label className="block text-xs font-medium text-gray-500 mb-1">
-            Reference Image <span className="text-red-400">*</span>
+            Reference Images <span className="text-red-400">*</span>
+            <span className="text-gray-400 font-normal ml-1">
+              ({referenceImages.length}/3)
+            </span>
           </label>
-          {referenceImage ? (
+          {referenceImages.length > 0 ? (
             <div className="flex items-center gap-3">
-              <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 shrink-0">
-                <img
-                  src={referenceImage.url}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
-              </div>
+              {referenceImages.map((img, i) => (
+                <div key={img.id} className="relative w-16 h-16 rounded-lg overflow-hidden bg-gray-100 shrink-0">
+                  <img
+                    src={img.url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                  <button
+                    onClick={() => setReferenceImages((prev) => prev.filter((_, j) => j !== i))}
+                    disabled={generating}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center hover:bg-red-600 disabled:opacity-50"
+                  >
+                    ×
+                  </button>
+                  <span className="absolute bottom-0 left-0 bg-black/50 text-white text-[9px] px-1 rounded-tr">
+                    {i + 1}
+                  </span>
+                </div>
+              ))}
               <button
                 onClick={() => setPickerOpen(true)}
-                disabled={generating}
+                disabled={generating || referenceImages.length >= 3}
                 className="text-xs text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
               >
-                Change
-              </button>
-              <button
-                onClick={() => setReferenceImage(null)}
-                disabled={generating}
-                className="text-xs text-gray-400 hover:text-red-500 disabled:opacity-50"
-              >
-                Remove
+                {referenceImages.length >= 3 ? "" : "Add / Change"}
               </button>
             </div>
           ) : (
@@ -507,7 +515,7 @@ export default function Frames() {
               disabled={generating}
               className="px-4 py-2 text-sm border border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-indigo-400 hover:text-indigo-600 disabled:opacity-50 transition-colors"
             >
-              Choose reference image...
+              Choose reference images (up to 3)...
             </button>
           )}
         </div>
@@ -531,12 +539,12 @@ export default function Frames() {
         {/* Generate button */}
         <div className="flex items-center justify-between">
           <p className="text-[10px] text-gray-400">
-            Generates 5 frames using your reference image (~10 min).{" "}
+            Generates 5 frames using your reference images (~10 min).{" "}
             <span className="text-gray-300">Cmd+Enter to generate</span>
           </p>
           <button
             onClick={handleGenerate}
-            disabled={generating || !prompt.trim() || !referenceImage}
+            disabled={generating || !prompt.trim() || referenceImages.length === 0}
             className="px-5 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {generating ? (
@@ -688,8 +696,10 @@ export default function Frames() {
         brandId={brandId}
         token={token}
         open={pickerOpen}
-        onSelect={(img) => {
-          setReferenceImage(img);
+        maxSelect={3}
+        already={referenceImages}
+        onSelect={(imgs) => {
+          setReferenceImages(imgs);
           setPickerOpen(false);
         }}
         onClose={() => setPickerOpen(false)}

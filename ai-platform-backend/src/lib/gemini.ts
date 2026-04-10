@@ -116,7 +116,7 @@ export async function generateImage(
   if (previousFrame) {
     content.push({
       type: "text",
-      text: "The following image is the PREVIOUS FRAME in a video sequence. Generate the next frame while maintaining visual continuity — keep the same style, lighting, colors, and scene elements:",
+      text: "The following image is the PREVIOUS FRAME in a video sequence. Use it for scene continuity (camera angle, lighting, composition) but always refer to the PRODUCT REFERENCE images above as the ground truth for product appearance. Do NOT copy any product inaccuracies from the previous frame:",
     });
     content.push({
       type: "image_url",
